@@ -226,6 +226,7 @@
 
     /* Viewer */
     #viewer{
+      position: relative; /* ✅ anchor 3Dmol absolute canvas */
       width: 100%;
       height: 420px;
       border: 1px solid var(--border);
@@ -233,6 +234,15 @@
       overflow: hidden;
       background: #fff;
     }
+    /* ✅ force 3Dmol internal layers to stay inside the container */
+    #viewer canvas,
+    #viewer .mol-container,
+    #viewer > div{
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+    }
+
     .viewer-actions{
       display: flex;
       gap: 10px;
@@ -341,7 +351,7 @@
             <label for="searchMode">Search mode</label>
             <select id="searchMode" style="width:100%;" onchange="onModeChange()">
               <option value="formula" selected>Formula</option>
-              <option value="smiles">SMILES</option>
+              </option value="smiles">SMILES</option>
             </select>
           </div>
 
@@ -440,8 +450,8 @@
 <script>
   let INDEX = null;
   let CURRENT_MATCHES = [];
-  let VIEWER = null;
   let CURRENT_MOL_ID = null;
+  let VIEWER = null;
 
   let SPECTRA_ZIP = null;
   let GEOM_ZIP = null;
@@ -454,7 +464,6 @@
   const loadingText = document.getElementById("loadingText");
 
   function setStatus(kind, text){
-    // kind: "idle" | "ok" | "warn" | "err"
     statusDot.className = "dot";
     if (kind === "ok") statusDot.classList.add("ok");
     if (kind === "warn") statusDot.classList.add("warn");
@@ -496,6 +505,9 @@
     clearViewer("");
     setDownloadEnabled(false);
     CURRENT_MOL_ID = null;
+
+    // ensure layout settles for 3Dmol
+    forceViewerReflow();
   }
 
   async function loadZipOnce(which){
@@ -536,14 +548,13 @@
     INDEX = await r.json();
     hideLoading();
 
-    // Count molecules approximately: total matches across keys
     let count = 0;
     try{
       for (const k in INDEX){
         const ms = INDEX[k]?.matches || [];
         count += ms.length;
       }
-    } catch(e){ /* ignore */ }
+    } catch(e){}
 
     loadedCount.textContent = String(count);
     setStatus("ok", "Ready");
@@ -558,11 +569,19 @@
     VIEWER.render();
   }
 
+  function forceViewerReflow(){
+    if (!VIEWER) return;
+    requestAnimationFrame(() => {
+      VIEWER.resize();
+      VIEWER.render();
+    });
+  }
+  window.addEventListener("resize", forceViewerReflow);
+
   function clearViewer(msg=""){
     initViewer();
     VIEWER.clear();
-    VIEWER.resize();
-    VIEWER.render();
+    forceViewerReflow();
     document.getElementById("viewerMsg").textContent = msg;
   }
 
@@ -582,8 +601,8 @@
     VIEWER.addModel(xyzText, "xyz");
     VIEWER.setStyle({}, { stick: { radius: 0.18 }, sphere: { scale: 0.28 } });
     VIEWER.zoomTo();
-    VIEWER.resize();
     VIEWER.render();
+    forceViewerReflow();
 
     document.getElementById("viewerMsg").textContent = "";
     CURRENT_MOL_ID = molecule_id;
@@ -593,8 +612,7 @@
   function resetView(){
     if (!VIEWER) return;
     VIEWER.zoomTo();
-    VIEWER.resize();
-    VIEWER.render();
+    forceViewerReflow();
   }
 
   async function downloadXYZ(){
@@ -651,7 +669,7 @@
 
     const idx = await loadIndex();
     const mode = document.getElementById("searchMode").value;
-    const chargeFilter = document.getElementById("charge").value.trim(); // optional
+    const chargeFilter = document.getElementById("charge").value.trim();
 
     showLoading("Searching…");
 
