@@ -226,7 +226,7 @@
 
     /* Viewer */
     #viewer{
-      position: relative; /* anchor 3Dmol absolute canvas */
+      position: relative; /* ✅ anchor 3Dmol absolute canvas */
       width: 100%;
       height: 420px;
       border: 1px solid var(--border);
@@ -234,6 +234,7 @@
       overflow: hidden;
       background: #fff;
     }
+    /* ✅ force 3Dmol internal layers to stay inside the container */
     #viewer canvas,
     #viewer .mol-container,
     #viewer > div{
@@ -298,13 +299,13 @@
       list-style: none;
     }
     details.methods summary::-webkit-details-marker{ display:none; }
-    .methods ul{
+    .methods p, .methods ul{
       margin: 8px 0 0 0;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.45;
-      padding-left: 18px;
     }
+    .methods ul{ padding-left: 18px; }
 
     code{
       background: rgba(17,24,39,0.04);
@@ -325,11 +326,13 @@
     </div>
 
     <div class="badge-row">
-      <div class="badge">
+      <div class="badge" id="statusBadge">
         <span class="dot" id="statusDot"></span>
         <span id="statusText">Initializing…</span>
       </div>
-      <div class="badge">Loaded: <b id="loadedCount">—</b></div>
+      <div class="badge">
+        Loaded: <b id="loadedCount">—</b>
+      </div>
     </div>
   </div>
 </header>
@@ -390,22 +393,12 @@
       </div>
 
       <div class="card">
-        <h2>Matches (multi-select)</h2>
-        <label for="matchSelect">Select molecule(s)</label>
-        <select id="matchSelect" style="width:100%; height: 140px;" multiple onchange="selectMatchMulti()" disabled>
+        <h2>Matches</h2>
+        <label for="matchSelect">Select a molecule</label>
+        <select id="matchSelect" style="width:100%;" onchange="selectMatch()" disabled>
           <option value="">No matches loaded</option>
         </select>
-
-        <div class="viewer-actions" style="margin-top:10px;">
-          <button onclick="viewFirstSelected()">View (first)</button>
-          <button class="primary" onclick="compareSelectedIR()">Compare IR</button>
-          <button onclick="clearIRPlot()">Clear plot</button>
-        </div>
-
         <div class="section-note" style="margin-top:8px;">
-          Tip: Cmd-click (Mac) / Ctrl-click (Windows) to select multiple.
-        </div>
-        <div class="section-note" style="margin-top:4px;">
           Matches include dataset spin internally, but spin input is removed from the UI.
         </div>
       </div>
@@ -419,7 +412,7 @@
         <details class="methods">
           <summary>Methods / Notes</summary>
           <ul>
-            <li>IR spectra are broadened with a Gaussian (default FWHM = 25 cm⁻¹) and normalized per molecule.</li>
+            <li>IR spectra are broadened with a Gaussian (default FWHM = 25 cm⁻¹) and normalized for visualization.</li>
             <li>Frequencies are scaled by the “DFT freq scale” factor (default <code>0.98</code>) before plotting.</li>
             <li>Geometry is loaded from <code>geom.zip</code> and IR from <code>spectra.zip</code>.</li>
           </ul>
@@ -446,7 +439,7 @@
       <div class="card">
         <h2>IR spectrum</h2>
         <div id="plot"></div>
-        <div class="section-note">X-axis shown in conventional IR direction (high → low wavenumber).</div>
+        <div class="section-note">X-axis is shown in the conventional IR direction (high → low wavenumber).</div>
       </div>
 
     </div>
@@ -513,6 +506,7 @@
     setDownloadEnabled(false);
     CURRENT_MOL_ID = null;
 
+    // ensure layout settles for 3Dmol
     forceViewerReflow();
   }
 
@@ -548,7 +542,7 @@
 
   async function loadIndex(){
     if (INDEX) return INDEX;
-    setStatus("warn", "Loading index…");
+    setStatus("idle", "Loading index…");
     showLoading("Loading index.json…");
     const r = await fetch("index.json");
     INDEX = await r.json();
@@ -664,94 +658,6 @@
     return {x, y};
   }
 
-  function getSelectedIndices(){
-    const sel = document.getElementById("matchSelect");
-    return Array.from(sel.selectedOptions)
-      .map(o => parseInt(o.value, 10))
-      .filter(v => Number.isFinite(v));
-  }
-
-  function selectMatchMulti(){
-    // Multi-select: do not auto-render on click.
-    // Use "View (first)" or "Compare IR".
-  }
-
-  async function viewFirstSelected(){
-    const idxs = getSelectedIndices();
-    if (idxs.length === 0){
-      setMessage(`<span class="warn">Select at least one molecule in Matches.</span>`);
-      return;
-    }
-    await renderMatch(idxs[0]);
-  }
-
-  async function compareSelectedIR(){
-    setMessage("");
-    const idxs = getSelectedIndices();
-    if (idxs.length < 2){
-      setMessage(`<span class="warn">Select at least <b>two</b> molecules to compare.</span>`);
-      return;
-    }
-
-    const scale = Number(document.getElementById("freqScale").value) || 1.0;
-    const fwhm = 25.0;
-
-    showLoading(`Loading ${idxs.length} spectra…`);
-
-    const traces = [];
-    let skipped = 0;
-
-    for (const i of idxs){
-      const m = CURRENT_MATCHES[i];
-      if (!m){ skipped++; continue; }
-
-      if (!m.has_ir){ skipped++; continue; }
-
-      const spec = await readJSONFromZip("spectra", `spectra/${m.molecule_id}.json`);
-      if (!spec){ skipped++; continue; }
-
-      const freqs = (spec.frequencies || []).map(Number).map(f => f * scale);
-      const intens = (spec.intensities || []).map(Number);
-
-      const broad = broadenGaussian(freqs, intens, 0, 3200, 8000, fwhm);
-
-      traces.push({
-        x: broad.x,
-        y: broad.y,
-        mode: "lines",
-        name: m.molecule_id,
-        hovertemplate: `${m.molecule_id}<br>ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>`
-      });
-    }
-
-    hideLoading();
-
-    if (traces.length < 2){
-      setMessage(`<span class="warn">Could not load ≥2 IR spectra from the selected entries (missing IR or missing files in spectra.zip).</span>`);
-      return;
-    }
-
-    const layout = {
-      title: `IR Comparison (${traces.length} molecules, scaled by ${scale})`,
-      margin: { l: 60, r: 20, t: 60, b: 70 },
-      xaxis: { title: "Wavenumber (cm⁻¹)", autorange: "reversed", gridcolor: "rgba(17,24,39,0.06)" },
-      yaxis: { title: "Intensity (normalized per molecule)", gridcolor: "rgba(17,24,39,0.06)", rangemode: "tozero" },
-      hovermode: "x unified",
-      legend: { orientation: "h", y: -0.25 }
-    };
-
-    Plotly.newPlot("plot", traces, layout, {responsive: true});
-
-    const extra = skipped > 0 ? ` (skipped ${skipped} selections with missing IR)` : "";
-    setMessage(`<span class="ok">Plotted ${traces.length} spectra on the same axes.${extra}</span>`);
-  }
-
-  function clearIRPlot(){
-    Plotly.purge("plot");
-    document.getElementById("plot").innerHTML = "";
-    setMessage("");
-  }
-
   async function search(){
     setMessage("");
     setMetaHTML("No molecule selected.");
@@ -840,11 +746,14 @@
       return `<option value="${i}">${label}</option>`;
     }).join("");
 
-    // Select the first one by default
-    if (sel.options.length > 0) sel.options[0].selected = true;
-
-    // Keep the old behavior: view first match immediately
+    sel.value = "0";
     await renderMatch(0);
+  }
+
+  async function selectMatch(){
+    const sel = document.getElementById("matchSelect");
+    const i = parseInt(sel.value, 10);
+    if (!Number.isNaN(i)) await renderMatch(i);
   }
 
   async function renderMatch(i){
@@ -891,7 +800,6 @@
       x: broad.x,
       y: broad.y,
       mode: "lines",
-      name: m.molecule_id,
       hovertemplate: "ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>"
     };
 
@@ -904,6 +812,7 @@
     };
 
     Plotly.newPlot("plot", [trace], layout, {responsive: true});
+
     setMessage(`<span class="ok">Showing broadened IR spectrum (Gaussian, FWHM=${fwhm} cm⁻¹). Frequencies scaled by ${scale}.</span>`);
   }
 
