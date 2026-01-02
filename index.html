@@ -1,0 +1,399 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>LIBE IR Viewer</title>
+
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 18px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
+    .field { display: flex; flex-direction: column; }
+    .hint { font-size: 12px; color: #666; margin-top: 2px; }
+
+    input, select { padding: 8px; }
+    input.wide { width: 640px; max-width: 92vw; }
+    input.small { width: 130px; }
+    select.mode { width: 240px; }
+    select.matches { width: 880px; max-width: 92vw; }
+    button { padding: 9px 14px; cursor: pointer; }
+
+    #msg { margin: 10px 0; font-size: 14px; }
+    #meta { margin: 10px 0; font-size: 13px; color: #333; }
+    .warn { color: #b00020; }
+    .ok { color: #1b5e20; }
+    code { background: #f6f6f6; padding: 2px 5px; border-radius: 4px; }
+
+    /* ---- Structure (CAGED) ---- */
+    #viewerWrap {
+      margin-top: 14px;
+      position: relative;    /* IMPORTANT: cage absolute canvas */
+    }
+    #viewerRow {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: start;
+    }
+    #viewer {
+      width: 760px;
+      height: 440px;
+      max-width: 92vw;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      position: relative;    /* IMPORTANT */
+      overflow: hidden;      /* IMPORTANT */
+    }
+    #viewerSide {
+      min-width: 240px;
+      max-width: 92vw;
+    }
+    #viewerMsg { margin-top: 8px; font-size: 12px; color: #666; }
+
+    /* ---- IR ---- */
+    #plot {
+      width: 100%;
+      height: 540px;
+      border: 1px solid #eee;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>LIBE IR Spectra Viewer</h2>
+
+  <!-- Search controls -->
+  <div class="row">
+    <div class="field">
+      <label>Search mode</label>
+      <select id="searchMode" class="mode" onchange="onModeChange()">
+        <option value="smiles">SMILES</option>
+        <option value="formula">Formula</option>
+      </select>
+    </div>
+
+    <div class="field" id="smilesBox">
+      <label>SMILES</label>
+      <input id="smiles" class="wide" placeholder="Paste SMILES here (must match this snapshot)" />
+      <div class="hint">Tip: use the SMILES produced by your LIBE indexing pipeline.</div>
+    </div>
+
+    <div class="field" id="formulaBox" style="display:none;">
+      <label>Formula</label>
+      <input id="formula" class="wide" placeholder="e.g. C3 F1 H3 O3" />
+      <div class="hint">Must match LIBE formatting exactly (spaces included).</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="field" id="spinBox">
+      <label>Spin (multiplicity)</label>
+      <input id="spin" class="small" placeholder="1" />
+    </div>
+
+    <div class="field" id="chargeBox">
+      <label>Charge</label>
+      <input id="charge" class="small" placeholder="0" />
+      <div class="hint" id="chargeHint">Required for SMILES mode.</div>
+    </div>
+
+    <button onclick="search()">Search</button>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label>Matches</label>
+      <select id="matchSelect" class="matches" onchange="selectMatch()" disabled>
+        <option value="">No matches loaded</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="msg"></div>
+  <div id="meta"></div>
+
+  <!-- Structure -->
+  <div id="viewerWrap">
+    <div style="font-size:13px; color:#333; margin-bottom:6px;"><b>Structure</b></div>
+
+    <div id="viewerRow">
+      <div id="viewer"></div>
+
+      <div id="viewerSide">
+        <button onclick="resetView()">Reset view</button>
+        <div id="viewerMsg"></div>
+        <div class="hint" style="margin-top:10px;">
+          Requires local geometry files at <code>site/geom/&lt;molecule_id&gt;.xyz</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IR -->
+  <div id="plot"></div>
+
+<script>
+let INDEX = null;
+let CURRENT_MATCHES = [];
+let VIEWER = null;
+
+async function loadIndex() {
+  if (INDEX) return INDEX;
+  const r = await fetch("index.json");
+  INDEX = await r.json();
+  return INDEX;
+}
+
+function setMessage(html) { document.getElementById("msg").innerHTML = html; }
+function setMeta(html) { document.getElementById("meta").innerHTML = html; }
+
+function clearPlot() {
+  Plotly.purge("plot");
+  document.getElementById("plot").innerHTML = "";
+}
+
+function resetDropdown() {
+  const sel = document.getElementById("matchSelect");
+  sel.innerHTML = `<option value="">No matches loaded</option>`;
+  sel.disabled = true;
+  CURRENT_MATCHES = [];
+}
+
+function onModeChange() {
+  const mode = document.getElementById("searchMode").value;
+
+  document.getElementById("smilesBox").style.display  = (mode === "smiles") ? "" : "none";
+  document.getElementById("spinBox").style.display    = (mode === "smiles") ? "" : "none";
+  document.getElementById("formulaBox").style.display = (mode === "formula") ? "" : "none";
+
+  document.getElementById("chargeHint").innerText =
+    (mode === "smiles") ? "Required for SMILES mode." : "Optional filter in formula mode.";
+
+  setMessage("");
+  setMeta("");
+  clearPlot();
+  resetDropdown();
+  clearViewer("");
+}
+
+function makeKey(smiles, charge, spin) {
+  return `${(smiles||"").trim()}||${charge}||${spin}`;
+}
+
+/* ---------- 3Dmol (CAGED) ---------- */
+function initViewer() {
+  if (VIEWER) return;
+  const element = document.getElementById("viewer");
+  VIEWER = $3Dmol.createViewer(element, { backgroundColor: "white" });
+  VIEWER.resize();   // IMPORTANT
+  VIEWER.render();
+}
+
+function clearViewer(msg="") {
+  initViewer();
+  VIEWER.clear();
+  VIEWER.resize();   // IMPORTANT
+  VIEWER.render();
+  document.getElementById("viewerMsg").innerText = msg;
+}
+
+async function renderMoleculeXYZ(molecule_id) {
+  initViewer();
+  clearViewer("Loading geometry…");
+
+  const xyzResp = await fetch(`geom/${molecule_id}.xyz`);
+  if (!xyzResp.ok) {
+    clearViewer(`Geometry missing: geom/${molecule_id}.xyz (create site/geom/*.xyz).`);
+    return;
+  }
+  const xyzText = await xyzResp.text();
+
+  VIEWER.clear();
+  VIEWER.addModel(xyzText, "xyz");
+  VIEWER.setStyle({}, {stick: {radius: 0.18}, sphere: {scale: 0.28}});
+  VIEWER.zoomTo();
+  VIEWER.resize();   // IMPORTANT
+  VIEWER.render();
+  document.getElementById("viewerMsg").innerText = "";
+}
+
+function resetView() {
+  if (!VIEWER) return;
+  VIEWER.zoomTo();
+  VIEWER.resize();
+  VIEWER.render();
+}
+
+/* ---------- IR broadening ---------- */
+function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0) {
+  const sigma = fwhm / 2.355;
+  const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
+  let y = new Array(npts).fill(0.0);
+
+  for (let i = 0; i < freqs.length; i++) {
+    const f = freqs[i];
+    const I = Math.max(0, intens[i]);
+    if (!Number.isFinite(f) || !Number.isFinite(I) || f <= 0) continue;
+    for (let k = 0; k < npts; k++) {
+      const dx = x[k] - f;
+      y[k] += I * Math.exp(-(dx * dx) / (2 * sigma * sigma));
+    }
+  }
+
+  const ymin = Math.min(...y);
+  y = y.map(v => v - ymin);
+  const ymax = Math.max(...y);
+  if (ymax > 0) y = y.map(v => v / ymax);
+  return {x, y};
+}
+
+async function search() {
+  setMessage("");
+  setMeta("");
+  clearPlot();
+  resetDropdown();
+  clearViewer("");
+
+  const idx = await loadIndex();
+  const mode = document.getElementById("searchMode").value;
+
+  if (mode === "smiles") {
+    const smiles = document.getElementById("smiles").value.trim();
+    const charge = document.getElementById("charge").value.trim();
+    const spin = document.getElementById("spin").value.trim();
+
+    if (!smiles || charge === "" || spin === "") {
+      setMessage(`<span class="warn">Please enter <b>SMILES</b>, <b>charge</b>, and <b>spin</b>.</span>`);
+      return;
+    }
+
+    const rec = idx[makeKey(smiles, charge, spin)];
+    if (!rec) {
+      setMessage(`<span class="warn">No matching species found.</span>`);
+      return;
+    }
+
+    CURRENT_MATCHES = (rec.matches || []).map(m => ({...m, charge: charge, spin: spin}));
+
+  } else {
+    const formula = document.getElementById("formula").value.trim();
+    const chargeFilter = document.getElementById("charge").value.trim(); // optional
+
+    if (!formula) {
+      setMessage(`<span class="warn">Please enter a formula like <code>C3 F1 H3 O3</code>.</span>`);
+      return;
+    }
+
+    const hits = [];
+    for (const k in idx) {
+      const rec = idx[k];
+      const ms = rec?.matches || [];
+      const parts = k.split("||");
+      const q = (parts[1] ?? "").trim();
+      const sp = (parts[2] ?? "").trim();
+
+      if (chargeFilter !== "" && q !== chargeFilter) continue;
+
+      for (const m of ms) {
+        if ((m.formula || "").trim() === formula) {
+          hits.push({...m, charge: q, spin: sp});
+        }
+      }
+    }
+
+    if (hits.length === 0) {
+      setMessage(`<span class="warn">No matches found for that formula${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
+      return;
+    }
+
+    CURRENT_MATCHES = hits;
+  }
+
+  if (CURRENT_MATCHES.length === 0) {
+    setMessage(`<span class="warn">No matches found.</span>`);
+    return;
+  }
+
+  const sel = document.getElementById("matchSelect");
+  sel.disabled = false;
+  sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
+    const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}`;
+    return `<option value="${i}">${label}</option>`;
+  }).join("");
+
+  sel.value = "0";
+  await renderMatch(0);
+}
+
+async function selectMatch() {
+  const sel = document.getElementById("matchSelect");
+  const i = parseInt(sel.value, 10);
+  if (!Number.isNaN(i)) await renderMatch(i);
+}
+
+async function renderMatch(i) {
+  setMessage("");
+  setMeta("");
+  clearPlot();
+
+  const m = CURRENT_MATCHES[i];
+  if (!m) return;
+
+  setMeta(
+    `<b>Molecule ID:</b> ${m.molecule_id}<br/>
+     <b>Formula:</b> ${m.formula || ""}<br/>
+     <b>Chemical system:</b> ${m.chemical_system || ""}<br/>
+     <b>Charge:</b> ${m.charge} &nbsp; <b>Spin:</b> ${m.spin}`
+  );
+
+  await renderMoleculeXYZ(m.molecule_id);
+
+  if (!m.has_ir) {
+    setMessage(`<span class="warn">Species exists, but IR spectrum is not available.</span>`);
+    return;
+  }
+
+  const specResp = await fetch(`spectra/${m.molecule_id}.json`);
+  if (!specResp.ok) {
+    setMessage(`<span class="warn">IR spectrum file missing locally.</span>`);
+    return;
+  }
+
+  const spec = await specResp.json();
+  const freqs = (spec.frequencies || []).map(Number);
+  const intens = (spec.intensities || []).map(Number);
+
+  const xmin = 0, xmax = 3200, npts = 8000, fwhm = 25.0;
+  const broad = broadenGaussian(freqs, intens, xmin, xmax, npts, fwhm);
+
+  // ONLY broadened curve
+  const trace = {
+    x: broad.x,
+    y: broad.y,
+    mode: "lines",
+    hovertemplate: "ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>"
+  };
+
+  const layout = {
+    title: `IR Spectrum: ${m.molecule_id}`,
+    xaxis: { title: "Wavenumber (cm⁻¹)", autorange: "reversed" },
+    yaxis: { title: "Intensity (normalized)" },
+    hovermode: "x unified"
+  };
+
+  Plotly.newPlot("plot", [trace], layout, {responsive: true});
+  setMessage(`<span class="ok">Showing broadened IR spectrum (Gaussian, FWHM=${fwhm} cm⁻¹).</span>`);
+}
+
+document.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+// init
+initViewer();
+onModeChange();
+</script>
+
+</body>
+</html>
