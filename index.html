@@ -1,480 +1,813 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>LIBE IR Viewer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>LIBE IR Spectra Viewer</title>
 
+  <!-- Plotly (IR plot) -->
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <!-- 3Dmol.js (molecule viewer) -->
   <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
-
   <!-- ZIP loader -->
   <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 
   <style>
-    body { font-family: Arial, sans-serif; margin: 18px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
-    .field { display: flex; flex-direction: column; }
-    .hint { font-size: 12px; color: #666; margin-top: 2px; }
-
-    input, select { padding: 8px; }
-    input.wide { width: 640px; max-width: 92vw; }
-    input.small { width: 130px; }
-    select.mode { width: 240px; }
-    select.matches { width: 880px; max-width: 92vw; }
-    button { padding: 9px 14px; cursor: pointer; }
-
-    #msg { margin: 10px 0; font-size: 14px; }
-    #meta { margin: 10px 0; font-size: 13px; color: #333; }
-    .warn { color: #b00020; }
-    .ok { color: #1b5e20; }
-    code { background: #f6f6f6; padding: 2px 5px; border-radius: 4px; }
-
-    /* ---- Structure (caged) ---- */
-    #viewerWrap { margin-top: 14px; position: relative; }
-    #viewerRow { display: flex; gap: 12px; flex-wrap: wrap; align-items: start; }
-    #viewer {
-      width: 760px;
-      height: 440px;
-      max-width: 92vw;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      position: relative;
-      overflow: hidden; /* cage */
+    :root{
+      --bg: #f7f8fb;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --shadow: 0 6px 18px rgba(17,24,39,0.06);
+      --radius: 14px;
+      --pad: 14px;
+      --accent: #2563eb;
+      --ok: #166534;
+      --warn: #b00020;
     }
-    #viewerSide { min-width: 240px; max-width: 92vw; }
-    #viewerMsg { margin-top: 8px; font-size: 12px; color: #666; }
 
-    /* ---- IR ---- */
-    #plot {
+    * { box-sizing: border-box; }
+    body{
+      margin: 0;
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    /* Header bar */
+    header{
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(247,248,251,0.92);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .header-inner{
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 14px 16px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .title{
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .title h1{
+      font-size: 16px;
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .title .sub{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .badge-row{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .badge{
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.7);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      box-shadow: 0 2px 10px rgba(17,24,39,0.04);
+    }
+    .dot{
+      width: 8px; height: 8px; border-radius: 999px;
+      background: #9ca3af;
+      display: inline-block;
+    }
+    .dot.ok{ background: #22c55e; }
+    .dot.warn{ background: #f59e0b; }
+    .dot.err{ background: #ef4444; }
+
+    /* App layout */
+    .container{
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .app{
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    @media (max-width: 980px){
+      .app{ grid-template-columns: 1fr; }
+    }
+
+    /* Cards */
+    .card{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: var(--pad);
+    }
+    .card h2{
+      margin: 0 0 10px 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #111827;
+      letter-spacing: 0.2px;
+    }
+    .section-note{
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+
+    /* Sticky sidebar */
+    .sidebar{
+      position: sticky;
+      top: 74px; /* below header */
+      align-self: start;
+      display: grid;
+      gap: 12px;
+    }
+    @media (max-width: 980px){
+      .sidebar{ position: static; top: auto; }
+    }
+
+    /* Form controls */
+    .row{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    label{
+      font-size: 12px;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+    input, select, button{
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 13px;
+      outline: none;
+      background: #fff;
+    }
+    input:focus, select:focus{
+      border-color: rgba(37,99,235,0.55);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+    }
+    .wide{ width: min(720px, 100%); }
+    .small{ width: 140px; }
+
+    button{
+      cursor: pointer;
+      font-weight: 600;
+      background: #fff;
+    }
+    button.primary{
+      background: var(--accent);
+      color: #fff;
+      border-color: rgba(37,99,235,0.8);
+    }
+    button:disabled{
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .divider{
+      height: 1px;
+      background: var(--border);
+      margin: 12px 0;
+    }
+
+    /* Messages */
+    #msg{
+      margin-top: 10px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .ok{ color: var(--ok); }
+    .warn{ color: var(--warn); }
+    #meta{
+      margin-top: 8px;
+      font-size: 13px;
+      color: #111827;
+      line-height: 1.45;
+    }
+    .meta-grid{
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 6px 10px;
+      margin-top: 6px;
+    }
+    .meta-grid div:nth-child(odd){
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* Right content */
+    .content{
+      display: grid;
+      gap: 12px;
+    }
+
+    /* Viewer */
+    #viewer{
       width: 100%;
-      height: 540px;
-      border: 1px solid #eee;
-      margin-top: 16px;
+      height: 420px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .viewer-actions{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    #viewerMsg{
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      min-height: 16px;
+    }
+
+    /* Plot */
+    #plot{
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    /* Loading indicator */
+    .loading{
+      display: none;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .spinner{
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Collapsible Methods */
+    details.methods{
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(249,250,251,0.7);
+    }
+    details.methods summary{
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 12.5px;
+      color: #111827;
+      list-style: none;
+    }
+    details.methods summary::-webkit-details-marker{ display:none; }
+    .methods p, .methods ul{
+      margin: 8px 0 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .methods ul{ padding-left: 18px; }
+
+    code{
+      background: rgba(17,24,39,0.04);
+      padding: 2px 6px;
+      border-radius: 8px;
+      border: 1px solid rgba(17,24,39,0.06);
+      font-size: 12px;
     }
   </style>
 </head>
 
 <body>
-  <h2>LIBE IR Spectra Viewer</h2>
-
-  <!-- Search controls -->
-  <div class="row">
-    <div class="field">
-      <label>Search mode</label>
-      <select id="searchMode" class="mode" onchange="onModeChange()">
-        <!-- (2) default = formula -->
-        <option value="formula" selected>Formula</option>
-        <option value="smiles">SMILES</option>
-      </select>
+<header>
+  <div class="header-inner">
+    <div class="title">
+      <h1>LIBE IR Spectra Viewer</h1>
+      <div class="sub">Search by formula (default) or SMILES + optional charge. View geometry and broadened IR spectrum.</div>
     </div>
 
-    <div class="field" id="formulaBox">
-      <label>Formula</label>
-      <input id="formula" class="wide" placeholder="e.g. C3 F1 H3 O3" />
-      <div class="hint">Must match LIBE formatting exactly (spaces included).</div>
-    </div>
-
-    <div class="field" id="smilesBox" style="display:none;">
-      <label>SMILES</label>
-      <input id="smiles" class="wide" placeholder="Paste SMILES here (must match this snapshot)" />
-      <div class="hint">Tip: use the SMILES produced by your LIBE indexing pipeline.</div>
-    </div>
-  </div>
-
-  <div class="row">
-    <!-- (1) spin removed -->
-    <div class="field" id="chargeBox">
-      <label>Charge (optional)</label>
-      <input id="charge" class="small" placeholder="0" />
-      <div class="hint" id="chargeHint">Optional in both modes.</div>
-    </div>
-
-    <div class="field">
-      <label>DFT freq scale</label>
-      <input id="freqScale" class="small" placeholder="0.98" value="0.98" />
-      <div class="hint">Applied to frequencies before plotting.</div>
-    </div>
-
-    <button onclick="search()">Search</button>
-  </div>
-
-  <div class="row">
-    <div class="field">
-      <label>Matches</label>
-      <select id="matchSelect" class="matches" onchange="selectMatch()" disabled>
-        <option value="">No matches loaded</option>
-      </select>
-    </div>
-  </div>
-
-  <div id="msg"></div>
-  <div id="meta"></div>
-
-  <!-- Structure -->
-  <div id="viewerWrap">
-    <div style="font-size:13px; color:#333; margin-bottom:6px;"><b>Structure</b></div>
-
-    <div id="viewerRow">
-      <div id="viewer"></div>
-
-      <div id="viewerSide">
-        <button onclick="resetView()">Reset view</button>
-        <!-- (3) download xyz -->
-        <button id="downloadBtn" onclick="downloadXYZ()" disabled>Download XYZ</button>
-
-        <div id="viewerMsg"></div>
-        <div class="hint" style="margin-top:10px;">
-          Loads geometry from <code>geom.zip</code> (file: <code>geom/&lt;molecule_id&gt;.xyz</code>)
-        </div>
+    <div class="badge-row">
+      <div class="badge" id="statusBadge">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Initializing…</span>
+      </div>
+      <div class="badge">
+        Loaded: <b id="loadedCount">—</b>
       </div>
     </div>
   </div>
+</header>
 
-  <!-- IR -->
-  <div id="plot"></div>
+<div class="container">
+  <div class="app">
+
+    <!-- LEFT: Sticky sidebar -->
+    <div class="sidebar">
+
+      <div class="card">
+        <h2>Search</h2>
+
+        <div class="row">
+          <div style="flex:1; min-width: 220px;">
+            <label for="searchMode">Search mode</label>
+            <select id="searchMode" style="width:100%;" onchange="onModeChange()">
+              <option value="formula" selected>Formula</option>
+              <option value="smiles">SMILES</option>
+            </select>
+          </div>
+
+          <div style="min-width: 160px;">
+            <label for="freqScale">DFT freq scale</label>
+            <input id="freqScale" class="small" value="0.98" />
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div id="formulaBox">
+          <label for="formula">Formula</label>
+          <input id="formula" class="wide" placeholder="e.g. C4 H4 Li2 O6" style="width:100%;" />
+          <div class="section-note">Must match LIBE formatting exactly (spaces included).</div>
+        </div>
+
+        <div id="smilesBox" style="display:none;">
+          <label for="smiles">SMILES</label>
+          <input id="smiles" class="wide" placeholder="Paste SMILES (must match this snapshot)" style="width:100%;" />
+          <div class="section-note">Exact string match against the indexed SMILES used to build <code>index.json</code>.</div>
+        </div>
+
+        <div class="row" style="margin-top: 10px;">
+          <div style="min-width: 180px;">
+            <label for="charge">Charge (optional)</label>
+            <input id="charge" class="small" placeholder="0" />
+          </div>
+
+          <button class="primary" onclick="search()">Search</button>
+        </div>
+
+        <div style="margin-top: 10px;" class="loading" id="loadingBar">
+          <div class="spinner"></div>
+          <div id="loadingText">Loading…</div>
+        </div>
+
+        <div id="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2>Matches</h2>
+        <label for="matchSelect">Select a molecule</label>
+        <select id="matchSelect" style="width:100%;" onchange="selectMatch()" disabled>
+          <option value="">No matches loaded</option>
+        </select>
+        <div class="section-note" style="margin-top:8px;">
+          Matches include dataset spin internally, but spin input is removed from the UI.
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Selected molecule</h2>
+        <div id="meta" class="section-note">No molecule selected.</div>
+
+        <div class="divider"></div>
+
+        <details class="methods">
+          <summary>Methods / Notes</summary>
+          <ul>
+            <li>IR spectra are broadened with a Gaussian (default FWHM = 25 cm⁻¹) and normalized for visualization.</li>
+            <li>Frequencies are scaled by the “DFT freq scale” factor (default <code>0.98</code>) before plotting.</li>
+            <li>Geometry is loaded from <code>geom.zip</code> and IR from <code>spectra.zip</code>.</li>
+          </ul>
+        </details>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: content -->
+    <div class="content">
+
+      <div class="card">
+        <h2>Structure</h2>
+        <div id="viewer"></div>
+
+        <div class="viewer-actions">
+          <button onclick="resetView()">Reset view</button>
+          <button id="downloadBtn" onclick="downloadXYZ()" disabled>Download XYZ</button>
+        </div>
+        <div id="viewerMsg"></div>
+        <div class="section-note">Loads geometry from <code>geom.zip</code> (file: <code>geom/&lt;molecule_id&gt;.xyz</code>).</div>
+      </div>
+
+      <div class="card">
+        <h2>IR spectrum</h2>
+        <div id="plot"></div>
+        <div class="section-note">X-axis is shown in the conventional IR direction (high → low wavenumber).</div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
 
 <script>
-let INDEX = null;
-let CURRENT_MATCHES = [];
-let VIEWER = null;
-let CURRENT_MOL_ID = null;
+  let INDEX = null;
+  let CURRENT_MATCHES = [];
+  let VIEWER = null;
+  let CURRENT_MOL_ID = null;
 
-/* ---------- ZIP loading helpers ---------- */
-/* Your zips were created like: zip -r spectra.zip spectra   (so paths are spectra/xxx.json) */
-let SPECTRA_ZIP = null;
-let GEOM_ZIP = null;
+  let SPECTRA_ZIP = null;
+  let GEOM_ZIP = null;
 
-async function loadZipOnce(which) {
-  if (which === "spectra") {
-    if (SPECTRA_ZIP) return SPECTRA_ZIP;
-    setMessage(`<span class="ok">Loading spectra.zip into memory…</span>`);
-    const buf = new Uint8Array(await (await fetch("spectra.zip")).arrayBuffer());
-    SPECTRA_ZIP = fflate.unzipSync(buf);
-    setMessage(`<span class="ok">spectra.zip loaded.</span>`);
-    return SPECTRA_ZIP;
-  } else {
-    if (GEOM_ZIP) return GEOM_ZIP;
-    document.getElementById("viewerMsg").innerText = "Loading geom.zip into memory…";
-    const buf = new Uint8Array(await (await fetch("geom.zip")).arrayBuffer());
-    GEOM_ZIP = fflate.unzipSync(buf);
-    document.getElementById("viewerMsg").innerText = "";
-    return GEOM_ZIP;
-  }
-}
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+  const loadedCount = document.getElementById("loadedCount");
 
-async function readTextFromZip(which, filename) {
-  const z = await loadZipOnce(which);
-  const entry = z[filename];
-  if (!entry) return null;
-  return new TextDecoder().decode(entry);
-}
+  const loadingBar = document.getElementById("loadingBar");
+  const loadingText = document.getElementById("loadingText");
 
-async function readJSONFromZip(which, filename) {
-  const txt = await readTextFromZip(which, filename);
-  return txt ? JSON.parse(txt) : null;
-}
-
-/* -------------------- index.json -------------------- */
-async function loadIndex() {
-  if (INDEX) return INDEX;
-  const r = await fetch("index.json");
-  INDEX = await r.json();
-  return INDEX;
-}
-
-function setMessage(html) { document.getElementById("msg").innerHTML = html; }
-function setMeta(html) { document.getElementById("meta").innerHTML = html; }
-
-function clearPlot() {
-  Plotly.purge("plot");
-  document.getElementById("plot").innerHTML = "";
-}
-
-function resetDropdown() {
-  const sel = document.getElementById("matchSelect");
-  sel.innerHTML = `<option value="">No matches loaded</option>`;
-  sel.disabled = true;
-  CURRENT_MATCHES = [];
-}
-
-function setDownloadEnabled(enabled) {
-  const b = document.getElementById("downloadBtn");
-  b.disabled = !enabled;
-}
-
-function onModeChange() {
-  const mode = document.getElementById("searchMode").value;
-
-  document.getElementById("smilesBox").style.display  = (mode === "smiles") ? "" : "none";
-  document.getElementById("formulaBox").style.display = (mode === "formula") ? "" : "none";
-
-  document.getElementById("chargeHint").innerText = "Optional in both modes.";
-
-  setMessage("");
-  setMeta("");
-  clearPlot();
-  resetDropdown();
-  clearViewer("");
-  setDownloadEnabled(false);
-  CURRENT_MOL_ID = null;
-}
-
-/* -------------------- 3Dmol (caged) -------------------- */
-function initViewer() {
-  if (VIEWER) return;
-  const element = document.getElementById("viewer");
-  VIEWER = $3Dmol.createViewer(element, { backgroundColor: "white" });
-  VIEWER.resize();
-  VIEWER.render();
-}
-
-function clearViewer(msg="") {
-  initViewer();
-  VIEWER.clear();
-  VIEWER.resize();
-  VIEWER.render();
-  document.getElementById("viewerMsg").innerText = msg;
-}
-
-async function renderMoleculeXYZ(molecule_id) {
-  initViewer();
-  clearViewer("Loading geometry…");
-  setDownloadEnabled(false);
-  CURRENT_MOL_ID = null;
-
-  // IMPORTANT: because your zip contains geom/<id>.xyz
-  const xyzText = await readTextFromZip("geom", `geom/${molecule_id}.xyz`);
-  if (!xyzText) {
-    clearViewer(`Geometry missing in geom.zip: geom/${molecule_id}.xyz`);
-    return;
+  function setStatus(kind, text){
+    // kind: "idle" | "ok" | "warn" | "err"
+    statusDot.className = "dot";
+    if (kind === "ok") statusDot.classList.add("ok");
+    if (kind === "warn") statusDot.classList.add("warn");
+    if (kind === "err") statusDot.classList.add("err");
+    statusText.textContent = text;
   }
 
-  VIEWER.clear();
-  VIEWER.addModel(xyzText, "xyz");
-  VIEWER.setStyle({}, {stick: {radius: 0.18}, sphere: {scale: 0.28}});
-  VIEWER.zoomTo();
-  VIEWER.resize();
-  VIEWER.render();
-
-  document.getElementById("viewerMsg").innerText = "";
-  CURRENT_MOL_ID = molecule_id;
-  setDownloadEnabled(true);
-}
-
-function resetView() {
-  if (!VIEWER) return;
-  VIEWER.zoomTo();
-  VIEWER.resize();
-  VIEWER.render();
-}
-
-/* (3) Download XYZ from geom.zip */
-async function downloadXYZ() {
-  if (!CURRENT_MOL_ID) return;
-
-  const xyzText = await readTextFromZip("geom", `geom/${CURRENT_MOL_ID}.xyz`);
-  if (!xyzText) {
-    setMessage(`<span class="warn">Cannot download: missing geom/${CURRENT_MOL_ID}.xyz in geom.zip</span>`);
-    return;
+  function showLoading(text){
+    loadingText.textContent = text;
+    loadingBar.style.display = "flex";
+  }
+  function hideLoading(){
+    loadingBar.style.display = "none";
   }
 
-  const blob = new Blob([xyzText], { type: "chemical/x-xyz;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
+  function setMessage(html){ document.getElementById("msg").innerHTML = html; }
+  function setMetaHTML(html){ document.getElementById("meta").innerHTML = html; }
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${CURRENT_MOL_ID}.xyz`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  function resetDropdown(){
+    const sel = document.getElementById("matchSelect");
+    sel.innerHTML = `<option value="">No matches loaded</option>`;
+    sel.disabled = true;
+    CURRENT_MATCHES = [];
+  }
 
-  URL.revokeObjectURL(url);
-}
+  function setDownloadEnabled(enabled){
+    document.getElementById("downloadBtn").disabled = !enabled;
+  }
 
-/* -------------------- IR broadening -------------------- */
-function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0) {
-  const sigma = fwhm / 2.355;
-  const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
-  let y = new Array(npts).fill(0.0);
+  function onModeChange(){
+    const mode = document.getElementById("searchMode").value;
+    document.getElementById("formulaBox").style.display = (mode === "formula") ? "" : "none";
+    document.getElementById("smilesBox").style.display  = (mode === "smiles")  ? "" : "none";
 
-  for (let i = 0; i < freqs.length; i++) {
-    const f = freqs[i];
-    const I = Math.max(0, intens[i]);
-    if (!Number.isFinite(f) || !Number.isFinite(I) || f <= 0) continue;
-    for (let k = 0; k < npts; k++) {
-      const dx = x[k] - f;
-      y[k] += I * Math.exp(-(dx * dx) / (2 * sigma * sigma));
+    setMessage("");
+    setMetaHTML("No molecule selected.");
+    Plotly.purge("plot");
+    resetDropdown();
+    clearViewer("");
+    setDownloadEnabled(false);
+    CURRENT_MOL_ID = null;
+  }
+
+  async function loadZipOnce(which){
+    if (which === "spectra"){
+      if (SPECTRA_ZIP) return SPECTRA_ZIP;
+      showLoading("Loading spectra.zip…");
+      const buf = new Uint8Array(await (await fetch("spectra.zip")).arrayBuffer());
+      SPECTRA_ZIP = fflate.unzipSync(buf);
+      hideLoading();
+      return SPECTRA_ZIP;
+    } else {
+      if (GEOM_ZIP) return GEOM_ZIP;
+      showLoading("Loading geom.zip…");
+      const buf = new Uint8Array(await (await fetch("geom.zip")).arrayBuffer());
+      GEOM_ZIP = fflate.unzipSync(buf);
+      hideLoading();
+      return GEOM_ZIP;
     }
   }
 
-  const ymin = Math.min(...y);
-  y = y.map(v => v - ymin);
-  const ymax = Math.max(...y);
-  if (ymax > 0) y = y.map(v => v / ymax);
-  return {x, y};
-}
+  async function readTextFromZip(which, filename){
+    const z = await loadZipOnce(which);
+    const entry = z[filename];
+    if (!entry) return null;
+    return new TextDecoder().decode(entry);
+  }
 
-/* -------------------- search + render -------------------- */
-/* IMPORTANT:
-   index.json is keyed by: "SMILES||charge||spin"
-   We remove spin from user input, but we still READ spin from the key
-*/
-async function search() {
-  setMessage("");
-  setMeta("");
-  clearPlot();
-  resetDropdown();
-  clearViewer("");
-  setDownloadEnabled(false);
-  CURRENT_MOL_ID = null;
+  async function readJSONFromZip(which, filename){
+    const txt = await readTextFromZip(which, filename);
+    return txt ? JSON.parse(txt) : null;
+  }
 
-  const idx = await loadIndex();
-  const mode = document.getElementById("searchMode").value;
+  async function loadIndex(){
+    if (INDEX) return INDEX;
+    setStatus("idle", "Loading index…");
+    showLoading("Loading index.json…");
+    const r = await fetch("index.json");
+    INDEX = await r.json();
+    hideLoading();
 
-  const chargeFilter = document.getElementById("charge").value.trim(); // optional in both modes
+    // Count molecules approximately: total matches across keys
+    let count = 0;
+    try{
+      for (const k in INDEX){
+        const ms = INDEX[k]?.matches || [];
+        count += ms.length;
+      }
+    } catch(e){ /* ignore */ }
 
-  if (mode === "smiles") {
-    const smiles = document.getElementById("smiles").value.trim();
-    if (!smiles) {
-      setMessage(`<span class="warn">Please enter a <b>SMILES</b> string.</span>`);
+    loadedCount.textContent = String(count);
+    setStatus("ok", "Ready");
+    return INDEX;
+  }
+
+  function initViewer(){
+    if (VIEWER) return;
+    const element = document.getElementById("viewer");
+    VIEWER = $3Dmol.createViewer(element, { backgroundColor: "white" });
+    VIEWER.resize();
+    VIEWER.render();
+  }
+
+  function clearViewer(msg=""){
+    initViewer();
+    VIEWER.clear();
+    VIEWER.resize();
+    VIEWER.render();
+    document.getElementById("viewerMsg").textContent = msg;
+  }
+
+  async function renderMoleculeXYZ(molecule_id){
+    initViewer();
+    clearViewer("Loading geometry…");
+    setDownloadEnabled(false);
+    CURRENT_MOL_ID = null;
+
+    const xyzText = await readTextFromZip("geom", `geom/${molecule_id}.xyz`);
+    if (!xyzText){
+      clearViewer(`Geometry missing: geom/${molecule_id}.xyz`);
       return;
     }
 
-    // scan all keys and match smiles; optionally filter by charge
-    const hits = [];
-    for (const k in idx) {
-      const parts = k.split("||");
-      const kSmiles = (parts[0] ?? "").trim();
-      const kCharge = (parts[1] ?? "").trim();
-      const kSpin = (parts[2] ?? "").trim();
+    VIEWER.clear();
+    VIEWER.addModel(xyzText, "xyz");
+    VIEWER.setStyle({}, { stick: { radius: 0.18 }, sphere: { scale: 0.28 } });
+    VIEWER.zoomTo();
+    VIEWER.resize();
+    VIEWER.render();
 
-      if (kSmiles !== smiles) continue;
-      if (chargeFilter !== "" && kCharge !== chargeFilter) continue;
+    document.getElementById("viewerMsg").textContent = "";
+    CURRENT_MOL_ID = molecule_id;
+    setDownloadEnabled(true);
+  }
 
-      const rec = idx[k];
-      const ms = rec?.matches || [];
-      for (const m of ms) hits.push({...m, charge: kCharge, spin: kSpin, smiles: kSmiles});
-    }
+  function resetView(){
+    if (!VIEWER) return;
+    VIEWER.zoomTo();
+    VIEWER.resize();
+    VIEWER.render();
+  }
 
-    if (hits.length === 0) {
-      setMessage(`<span class="warn">No matches found for that SMILES${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
+  async function downloadXYZ(){
+    if (!CURRENT_MOL_ID) return;
+    const xyzText = await readTextFromZip("geom", `geom/${CURRENT_MOL_ID}.xyz`);
+    if (!xyzText){
+      setMessage(`<span class="warn">Cannot download: missing geom/${CURRENT_MOL_ID}.xyz in geom.zip</span>`);
       return;
     }
 
-    CURRENT_MATCHES = hits;
+    const blob = new Blob([xyzText], { type: "chemical/x-xyz;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
 
-  } else {
-    const formula = document.getElementById("formula").value.trim();
-    if (!formula) {
-      setMessage(`<span class="warn">Please enter a formula like <code>C3 F1 H3 O3</code>.</span>`);
-      return;
-    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${CURRENT_MOL_ID}.xyz`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 
-    const hits = [];
-    for (const k in idx) {
-      const rec = idx[k];
-      const ms = rec?.matches || [];
-      const parts = k.split("||");
-      const q = (parts[1] ?? "").trim();
-      const sp = (parts[2] ?? "").trim();
-      const sm = (parts[0] ?? "").trim();
+    URL.revokeObjectURL(url);
+  }
 
-      if (chargeFilter !== "" && q !== chargeFilter) continue;
+  function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0){
+    const sigma = fwhm / 2.355;
+    const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
+    let y = new Array(npts).fill(0.0);
 
-      for (const m of ms) {
-        if ((m.formula || "").trim() === formula) {
-          hits.push({...m, charge: q, spin: sp, smiles: sm});
-        }
+    for (let i = 0; i < freqs.length; i++){
+      const f = freqs[i];
+      const I = Math.max(0, intens[i]);
+      if (!Number.isFinite(f) || !Number.isFinite(I) || f <= 0) continue;
+      for (let k = 0; k < npts; k++){
+        const dx = x[k] - f;
+        y[k] += I * Math.exp(-(dx * dx) / (2 * sigma * sigma));
       }
     }
 
-    if (hits.length === 0) {
-      setMessage(`<span class="warn">No matches found for that formula${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
+    const ymin = Math.min(...y);
+    y = y.map(v => v - ymin);
+    const ymax = Math.max(...y);
+    if (ymax > 0) y = y.map(v => v / ymax);
+    return {x, y};
+  }
+
+  async function search(){
+    setMessage("");
+    setMetaHTML("No molecule selected.");
+    Plotly.purge("plot");
+    resetDropdown();
+    clearViewer("");
+    setDownloadEnabled(false);
+    CURRENT_MOL_ID = null;
+
+    const idx = await loadIndex();
+    const mode = document.getElementById("searchMode").value;
+    const chargeFilter = document.getElementById("charge").value.trim(); // optional
+
+    showLoading("Searching…");
+
+    if (mode === "smiles"){
+      const smiles = document.getElementById("smiles").value.trim();
+      if (!smiles){
+        hideLoading();
+        setMessage(`<span class="warn">Please enter a <b>SMILES</b> string.</span>`);
+        return;
+      }
+
+      const hits = [];
+      for (const k in idx){
+        const parts = k.split("||");
+        const kSmiles = (parts[0] ?? "").trim();
+        const kCharge = (parts[1] ?? "").trim();
+        const kSpin = (parts[2] ?? "").trim();
+
+        if (kSmiles !== smiles) continue;
+        if (chargeFilter !== "" && kCharge !== chargeFilter) continue;
+
+        const rec = idx[k];
+        const ms = rec?.matches || [];
+        for (const m of ms) hits.push({...m, charge: kCharge, spin: kSpin, smiles: kSmiles});
+      }
+
+      hideLoading();
+
+      if (hits.length === 0){
+        setMessage(`<span class="warn">No matches found for that SMILES${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
+        return;
+      }
+      CURRENT_MATCHES = hits;
+
+    } else {
+      const formula = document.getElementById("formula").value.trim();
+      if (!formula){
+        hideLoading();
+        setMessage(`<span class="warn">Please enter a formula like <code>C4 H4 Li2 O6</code>.</span>`);
+        return;
+      }
+
+      const hits = [];
+      for (const k in idx){
+        const rec = idx[k];
+        const ms = rec?.matches || [];
+        const parts = k.split("||");
+        const q  = (parts[1] ?? "").trim();
+        const sp = (parts[2] ?? "").trim();
+        const sm = (parts[0] ?? "").trim();
+
+        if (chargeFilter !== "" && q !== chargeFilter) continue;
+
+        for (const m of ms){
+          if ((m.formula || "").trim() === formula){
+            hits.push({...m, charge: q, spin: sp, smiles: sm});
+          }
+        }
+      }
+
+      hideLoading();
+
+      if (hits.length === 0){
+        setMessage(`<span class="warn">No matches found for that formula${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
+        return;
+      }
+      CURRENT_MATCHES = hits;
+    }
+
+    const sel = document.getElementById("matchSelect");
+    sel.disabled = false;
+    sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
+      const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}`;
+      return `<option value="${i}">${label}</option>`;
+    }).join("");
+
+    sel.value = "0";
+    await renderMatch(0);
+  }
+
+  async function selectMatch(){
+    const sel = document.getElementById("matchSelect");
+    const i = parseInt(sel.value, 10);
+    if (!Number.isNaN(i)) await renderMatch(i);
+  }
+
+  async function renderMatch(i){
+    setMessage("");
+    Plotly.purge("plot");
+
+    const m = CURRENT_MATCHES[i];
+    if (!m) return;
+
+    setMetaHTML(`
+      <div class="meta-grid">
+        <div>Molecule ID</div><div><b>${m.molecule_id}</b></div>
+        <div>Formula</div><div>${m.formula || ""}</div>
+        <div>Chemical system</div><div>${m.chemical_system || ""}</div>
+        <div>Charge</div><div>${m.charge}</div>
+        <div>Spin</div><div>${m.spin}</div>
+      </div>
+    `);
+
+    await renderMoleculeXYZ(m.molecule_id);
+
+    if (!m.has_ir){
+      setMessage(`<span class="warn">Species exists, but IR spectrum is not available.</span>`);
       return;
     }
 
-    CURRENT_MATCHES = hits;
+    showLoading("Loading IR spectrum…");
+    const spec = await readJSONFromZip("spectra", `spectra/${m.molecule_id}.json`);
+    hideLoading();
+
+    if (!spec){
+      setMessage(`<span class="warn">IR missing: spectra/${m.molecule_id}.json</span>`);
+      return;
+    }
+
+    const scale = Number(document.getElementById("freqScale").value) || 1.0;
+    const freqs = (spec.frequencies || []).map(Number).map(f => f * scale);
+    const intens = (spec.intensities || []).map(Number);
+
+    const fwhm = 25.0;
+    const broad = broadenGaussian(freqs, intens, 0, 3200, 8000, fwhm);
+
+    const trace = {
+      x: broad.x,
+      y: broad.y,
+      mode: "lines",
+      hovertemplate: "ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>"
+    };
+
+    const layout = {
+      title: `IR Spectrum: ${m.molecule_id} (scaled by ${scale})`,
+      margin: { l: 60, r: 20, t: 60, b: 55 },
+      xaxis: { title: "Wavenumber (cm⁻¹)", autorange: "reversed", gridcolor: "rgba(17,24,39,0.06)" },
+      yaxis: { title: "Intensity (normalized)", gridcolor: "rgba(17,24,39,0.06)", rangemode: "tozero" },
+      hovermode: "x unified"
+    };
+
+    Plotly.newPlot("plot", [trace], layout, {responsive: true});
+
+    setMessage(`<span class="ok">Showing broadened IR spectrum (Gaussian, FWHM=${fwhm} cm⁻¹). Frequencies scaled by ${scale}.</span>`);
   }
 
-  const sel = document.getElementById("matchSelect");
-  sel.disabled = false;
-  sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
-    // Keep showing spin info (it exists in the dataset), just don’t ask user to input it.
-    const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}`;
-    return `<option value="${i}">${label}</option>`;
-  }).join("");
+  document.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 
-  sel.value = "0";
-  await renderMatch(0);
-}
-
-async function selectMatch() {
-  const sel = document.getElementById("matchSelect");
-  const i = parseInt(sel.value, 10);
-  if (!Number.isNaN(i)) await renderMatch(i);
-}
-
-async function renderMatch(i) {
-  setMessage("");
-  setMeta("");
-  clearPlot();
-
-  const m = CURRENT_MATCHES[i];
-  if (!m) return;
-
-  setMeta(
-    `<b>Molecule ID:</b> ${m.molecule_id}<br/>
-     <b>Formula:</b> ${m.formula || ""}<br/>
-     <b>Chemical system:</b> ${m.chemical_system || ""}<br/>
-     <b>Charge:</b> ${m.charge} &nbsp; <b>Spin:</b> ${m.spin}`
-  );
-
-  await renderMoleculeXYZ(m.molecule_id);
-
-  if (!m.has_ir) {
-    setMessage(`<span class="warn">Species exists, but IR spectrum is not available.</span>`);
-    return;
-  }
-
-  // IMPORTANT: because your zip contains spectra/<id>.json
-  const spec = await readJSONFromZip("spectra", `spectra/${m.molecule_id}.json`);
-  if (!spec) {
-    setMessage(`<span class="warn">IR spectrum missing in spectra.zip: spectra/${m.molecule_id}.json</span>`);
-    return;
-  }
-
-  // (4) frequency scaling for visualization
-  const scale = Number(document.getElementById("freqScale").value) || 1.0;
-
-  const freqs = (spec.frequencies || []).map(Number).map(f => f * scale);
-  const intens = (spec.intensities || []).map(Number);
-
-  const xmin = 0, xmax = 3200, npts = 8000, fwhm = 25.0;
-  const broad = broadenGaussian(freqs, intens, xmin, xmax, npts, fwhm);
-
-  const trace = {
-    x: broad.x,
-    y: broad.y,
-    mode: "lines",
-    hovertemplate: "ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>"
-  };
-
-  const layout = {
-    title: `IR Spectrum: ${m.molecule_id} (scaled by ${scale})`,
-    xaxis: { title: "Wavenumber (cm⁻¹)", autorange: "reversed" },
-    yaxis: { title: "Intensity (normalized)" },
-    hovermode: "x unified"
-  };
-
-  Plotly.newPlot("plot", [trace], layout, {responsive: true});
-  setMessage(`<span class="ok">Showing broadened IR spectrum (Gaussian, FWHM=${fwhm} cm⁻¹). Frequencies scaled by ${scale}.</span>`);
-}
-
-document.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
-
-// init
-initViewer();
-onModeChange();
+  // Init
+  initViewer();
+  onModeChange();
+  loadIndex().catch(err => {
+    hideLoading();
+    setStatus("err", "Failed to load");
+    setMessage(`<span class="warn">Error loading index.json: ${err.message}</span>`);
+  });
 </script>
 
 </body>
