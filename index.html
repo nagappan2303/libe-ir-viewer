@@ -7,6 +7,9 @@
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
 
+  <!-- ZIP loader -->
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+
   <style>
     body { font-family: Arial, sans-serif; margin: 18px; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
@@ -26,30 +29,19 @@
     .ok { color: #1b5e20; }
     code { background: #f6f6f6; padding: 2px 5px; border-radius: 4px; }
 
-    /* ---- Structure (CAGED) ---- */
-    #viewerWrap {
-      margin-top: 14px;
-      position: relative;    /* IMPORTANT: cage absolute canvas */
-    }
-    #viewerRow {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: start;
-    }
+    /* ---- Structure (caged) ---- */
+    #viewerWrap { margin-top: 14px; position: relative; }
+    #viewerRow { display: flex; gap: 12px; flex-wrap: wrap; align-items: start; }
     #viewer {
       width: 760px;
       height: 440px;
       max-width: 92vw;
       border: 1px solid #eee;
       border-radius: 10px;
-      position: relative;    /* IMPORTANT */
-      overflow: hidden;      /* IMPORTANT */
+      position: relative;
+      overflow: hidden; /* cage */
     }
-    #viewerSide {
-      min-width: 240px;
-      max-width: 92vw;
-    }
+    #viewerSide { min-width: 240px; max-width: 92vw; }
     #viewerMsg { margin-top: 8px; font-size: 12px; color: #666; }
 
     /* ---- IR ---- */
@@ -126,7 +118,7 @@
         <button onclick="resetView()">Reset view</button>
         <div id="viewerMsg"></div>
         <div class="hint" style="margin-top:10px;">
-          Requires local geometry files at <code>site/geom/&lt;molecule_id&gt;.xyz</code>
+          Loads geometry from <code>geom.zip</code> (file: <code>geom/&lt;molecule_id&gt;.xyz</code>)
         </div>
       </div>
     </div>
@@ -140,6 +132,42 @@ let INDEX = null;
 let CURRENT_MATCHES = [];
 let VIEWER = null;
 
+/* ---------- ZIP loading helpers ---------- */
+/* Your zips were created like: zip -r spectra.zip spectra   (so paths are spectra/xxx.json) */
+let SPECTRA_ZIP = null;
+let GEOM_ZIP = null;
+
+async function loadZipOnce(which) {
+  if (which === "spectra") {
+    if (SPECTRA_ZIP) return SPECTRA_ZIP;
+    setMessage(`<span class="ok">Loading spectra.zip into memory…</span>`);
+    const buf = new Uint8Array(await (await fetch("spectra.zip")).arrayBuffer());
+    SPECTRA_ZIP = fflate.unzipSync(buf);
+    setMessage(`<span class="ok">spectra.zip loaded.</span>`);
+    return SPECTRA_ZIP;
+  } else {
+    if (GEOM_ZIP) return GEOM_ZIP;
+    document.getElementById("viewerMsg").innerText = "Loading geom.zip into memory…";
+    const buf = new Uint8Array(await (await fetch("geom.zip")).arrayBuffer());
+    GEOM_ZIP = fflate.unzipSync(buf);
+    document.getElementById("viewerMsg").innerText = "";
+    return GEOM_ZIP;
+  }
+}
+
+async function readTextFromZip(which, filename) {
+  const z = await loadZipOnce(which);
+  const entry = z[filename];
+  if (!entry) return null;
+  return new TextDecoder().decode(entry);
+}
+
+async function readJSONFromZip(which, filename) {
+  const txt = await readTextFromZip(which, filename);
+  return txt ? JSON.parse(txt) : null;
+}
+
+/* -------------------- index.json -------------------- */
 async function loadIndex() {
   if (INDEX) return INDEX;
   const r = await fetch("index.json");
@@ -183,19 +211,19 @@ function makeKey(smiles, charge, spin) {
   return `${(smiles||"").trim()}||${charge}||${spin}`;
 }
 
-/* ---------- 3Dmol (CAGED) ---------- */
+/* -------------------- 3Dmol (caged) -------------------- */
 function initViewer() {
   if (VIEWER) return;
   const element = document.getElementById("viewer");
   VIEWER = $3Dmol.createViewer(element, { backgroundColor: "white" });
-  VIEWER.resize();   // IMPORTANT
+  VIEWER.resize();
   VIEWER.render();
 }
 
 function clearViewer(msg="") {
   initViewer();
   VIEWER.clear();
-  VIEWER.resize();   // IMPORTANT
+  VIEWER.resize();
   VIEWER.render();
   document.getElementById("viewerMsg").innerText = msg;
 }
@@ -204,18 +232,18 @@ async function renderMoleculeXYZ(molecule_id) {
   initViewer();
   clearViewer("Loading geometry…");
 
-  const xyzResp = await fetch(`geom/${molecule_id}.xyz`);
-  if (!xyzResp.ok) {
-    clearViewer(`Geometry missing: geom/${molecule_id}.xyz (create site/geom/*.xyz).`);
+  // IMPORTANT: because your zip contains geom/<id>.xyz
+  const xyzText = await readTextFromZip("geom", `geom/${molecule_id}.xyz`);
+  if (!xyzText) {
+    clearViewer(`Geometry missing in geom.zip: geom/${molecule_id}.xyz`);
     return;
   }
-  const xyzText = await xyzResp.text();
 
   VIEWER.clear();
   VIEWER.addModel(xyzText, "xyz");
   VIEWER.setStyle({}, {stick: {radius: 0.18}, sphere: {scale: 0.28}});
   VIEWER.zoomTo();
-  VIEWER.resize();   // IMPORTANT
+  VIEWER.resize();
   VIEWER.render();
   document.getElementById("viewerMsg").innerText = "";
 }
@@ -227,7 +255,7 @@ function resetView() {
   VIEWER.render();
 }
 
-/* ---------- IR broadening ---------- */
+/* -------------------- IR broadening -------------------- */
 function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0) {
   const sigma = fwhm / 2.355;
   const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
@@ -250,6 +278,7 @@ function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0)
   return {x, y};
 }
 
+/* -------------------- search + render -------------------- */
 async function search() {
   setMessage("");
   setMeta("");
@@ -356,20 +385,19 @@ async function renderMatch(i) {
     return;
   }
 
-  const specResp = await fetch(`spectra/${m.molecule_id}.json`);
-  if (!specResp.ok) {
-    setMessage(`<span class="warn">IR spectrum file missing locally.</span>`);
+  // IMPORTANT: because your zip contains spectra/<id>.json
+  const spec = await readJSONFromZip("spectra", `spectra/${m.molecule_id}.json`);
+  if (!spec) {
+    setMessage(`<span class="warn">IR spectrum missing in spectra.zip: spectra/${m.molecule_id}.json</span>`);
     return;
   }
 
-  const spec = await specResp.json();
   const freqs = (spec.frequencies || []).map(Number);
   const intens = (spec.intensities || []).map(Number);
 
   const xmin = 0, xmax = 3200, npts = 8000, fwhm = 25.0;
   const broad = broadenGaussian(freqs, intens, xmin, xmax, npts, fwhm);
 
-  // ONLY broadened curve
   const trace = {
     x: broad.x,
     y: broad.y,
