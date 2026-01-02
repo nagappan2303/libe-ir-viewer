@@ -1,550 +1,481 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>LIBE IR + Molecule Viewer</title>
+  <meta charset="utf-8"/>
+  <title>LIBE IR Viewer</title>
 
-  <!-- 3Dmol.js (molecule viewer) -->
-  <script src="https://3Dmol.org/build/3Dmol-min.js"></script>
-
-  <!-- Plotly (IR plot) -->
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+
+  <!-- ZIP loader -->
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; }
-    header { padding: 14px 18px; border-bottom: 1px solid #ddd; }
-    main { display: grid; grid-template-columns: 380px 1fr; gap: 14px; padding: 14px; }
-    .panel { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    label { font-size: 13px; color: #333; }
-    input, select, button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
-    button { cursor: pointer; }
-    button.primary { border-color: #2b6; }
-    .small { font-size: 12px; color: #666; }
-    .muted { color: #777; }
-    #viewer { width: 100%; height: 430px; border-radius: 10px; border: 1px solid #ddd; }
-    #plot { width: 100%; height: 430px; border-radius: 10px; border: 1px solid #ddd; }
-    .kvs { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; margin-top: 10px; }
-    .kvs div { font-size: 13px; }
-    .hr { height: 1px; background: #eee; margin: 12px 0; }
-    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; color: #444; }
+    body { font-family: Arial, sans-serif; margin: 18px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
+    .field { display: flex; flex-direction: column; }
+    .hint { font-size: 12px; color: #666; margin-top: 2px; }
+
+    input, select { padding: 8px; }
+    input.wide { width: 640px; max-width: 92vw; }
+    input.small { width: 130px; }
+    select.mode { width: 240px; }
+    select.matches { width: 880px; max-width: 92vw; }
+    button { padding: 9px 14px; cursor: pointer; }
+
+    #msg { margin: 10px 0; font-size: 14px; }
+    #meta { margin: 10px 0; font-size: 13px; color: #333; }
+    .warn { color: #b00020; }
+    .ok { color: #1b5e20; }
+    code { background: #f6f6f6; padding: 2px 5px; border-radius: 4px; }
+
+    /* ---- Structure (caged) ---- */
+    #viewerWrap { margin-top: 14px; position: relative; }
+    #viewerRow { display: flex; gap: 12px; flex-wrap: wrap; align-items: start; }
+    #viewer {
+      width: 760px;
+      height: 440px;
+      max-width: 92vw;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      position: relative;
+      overflow: hidden; /* cage */
+    }
+    #viewerSide { min-width: 240px; max-width: 92vw; }
+    #viewerMsg { margin-top: 8px; font-size: 12px; color: #666; }
+
+    /* ---- IR ---- */
+    #plot {
+      width: 100%;
+      height: 540px;
+      border: 1px solid #eee;
+      margin-top: 16px;
+    }
   </style>
 </head>
 
 <body>
-<header>
-  <div class="row" style="justify-content: space-between;">
-    <div>
-      <div style="font-weight: 700;">LIBE IR + Molecule Viewer</div>
-      <div class="small muted">Search by formula (default) or by SMILES + optional charge. View structure and IR spectrum.</div>
-    </div>
-    <div class="pill" id="statusPill">Loading data…</div>
-  </div>
-</header>
+  <h2>LIBE IR Spectra Viewer</h2>
 
-<main>
-  <!-- Left: controls + metadata -->
-  <section class="panel">
-    <div class="row" style="justify-content: space-between;">
-      <div style="font-weight: 600;">Search</div>
-      <div class="row">
-        <label for="freqScale" class="small">Freq scale</label>
-        <input id="freqScale" type="number" step="0.001" min="0.90" max="1.10" value="0.98" style="width: 86px;" />
-      </div>
-    </div>
-
-    <div class="hr"></div>
-
-    <div class="row">
-      <label for="searchMode">Mode</label>
-      <select id="searchMode">
-        <!-- (2) Default is formula -->
+  <!-- Search controls -->
+  <div class="row">
+    <div class="field">
+      <label>Search mode</label>
+      <select id="searchMode" class="mode" onchange="onModeChange()">
+        <!-- (2) default = formula -->
         <option value="formula" selected>Formula</option>
         <option value="smiles">SMILES</option>
       </select>
     </div>
 
-    <div class="hr"></div>
-
-    <!-- Formula search -->
-    <div id="formulaBox">
-      <div class="row">
-        <label for="formulaInput">Formula</label>
-        <input id="formulaInput" placeholder="e.g., C3H4O3Li1" style="flex: 1;" />
-      </div>
-      <div class="row" style="margin-top: 8px;">
-        <label for="formulaCharge">Charge (optional)</label>
-        <input id="formulaCharge" type="number" step="1" placeholder="e.g., -1" style="width: 120px;" />
-      </div>
-      <div class="row" style="margin-top: 10px;">
-        <button class="primary" id="searchFormulaBtn">Search</button>
-        <button id="clearBtn">Clear</button>
-      </div>
-      <div class="small muted" style="margin-top: 8px;">
-        Tip: formula matching is exact here. If you want “contains” matching, tell me and I’ll switch it.
-      </div>
+    <div class="field" id="formulaBox">
+      <label>Formula</label>
+      <input id="formula" class="wide" placeholder="e.g. C3 F1 H3 O3" />
+      <div class="hint">Must match LIBE formatting exactly (spaces included).</div>
     </div>
 
-    <!-- SMILES search -->
-    <div id="smilesBox" style="display:none;">
-      <div class="row">
-        <label for="smilesInput">SMILES</label>
-        <input id="smilesInput" placeholder="e.g., O=C1OCCO1" style="flex: 1;" />
-      </div>
+    <div class="field" id="smilesBox" style="display:none;">
+      <label>SMILES</label>
+      <input id="smiles" class="wide" placeholder="Paste SMILES here (must match this snapshot)" />
+      <div class="hint">Tip: use the SMILES produced by your LIBE indexing pipeline.</div>
+    </div>
+  </div>
 
-      <div class="row" style="margin-top: 8px;">
-        <label for="smilesCharge">Charge (optional)</label>
-        <input id="smilesCharge" type="number" step="1" placeholder="e.g., 0" style="width: 120px;" />
-      </div>
-
-      <!-- (1) Spin removed entirely -->
-
-      <div class="row" style="margin-top: 10px;">
-        <button class="primary" id="searchSmilesBtn">Search</button>
-        <button id="clearBtn2">Clear</button>
-      </div>
-      <div class="small muted" style="margin-top: 8px;">
-        SMILES match is exact here (string equality). If you want canonicalization, we’d need a backend or a JS chem lib.
-      </div>
+  <div class="row">
+    <!-- (1) spin removed -->
+    <div class="field" id="chargeBox">
+      <label>Charge (optional)</label>
+      <input id="charge" class="small" placeholder="0" />
+      <div class="hint" id="chargeHint">Optional in both modes.</div>
     </div>
 
-    <div class="hr"></div>
+    <div class="field">
+      <label>DFT freq scale</label>
+      <input id="freqScale" class="small" placeholder="0.98" value="0.98" />
+      <div class="hint">Applied to frequencies before plotting.</div>
+    </div>
 
-    <div style="font-weight: 600;">Results</div>
-    <div class="row" style="margin-top: 8px;">
-      <select id="resultsSelect" style="width: 100%;">
-        <option value="">— No results —</option>
+    <button onclick="search()">Search</button>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label>Matches</label>
+      <select id="matchSelect" class="matches" onchange="selectMatch()" disabled>
+        <option value="">No matches loaded</option>
       </select>
     </div>
+  </div>
 
-    <div class="row" style="margin-top: 10px;">
-      <!-- (3) Download XYZ -->
-      <button id="downloadXyzBtn" disabled>Download XYZ</button>
+  <div id="msg"></div>
+  <div id="meta"></div>
+
+  <!-- Structure -->
+  <div id="viewerWrap">
+    <div style="font-size:13px; color:#333; margin-bottom:6px;"><b>Structure</b></div>
+
+    <div id="viewerRow">
+      <div id="viewer"></div>
+
+      <div id="viewerSide">
+        <button onclick="resetView()">Reset view</button>
+        <!-- (3) download xyz -->
+        <button id="downloadBtn" onclick="downloadXYZ()" disabled>Download XYZ</button>
+
+        <div id="viewerMsg"></div>
+        <div class="hint" style="margin-top:10px;">
+          Loads geometry from <code>geom.zip</code> (file: <code>geom/&lt;molecule_id&gt;.xyz</code>)
+        </div>
+      </div>
     </div>
+  </div>
 
-    <div class="hr"></div>
-
-    <div style="font-weight: 600;">Selected molecule</div>
-    <div class="kvs" id="metaBox">
-      <div class="muted">Status</div><div class="muted">No molecule selected.</div>
-    </div>
-  </section>
-
-  <!-- Right: viewer + plot -->
-  <section class="panel">
-    <div class="row" style="justify-content: space-between;">
-      <div style="font-weight: 600;">Structure</div>
-      <div class="small muted" id="viewerNote"> </div>
-    </div>
-    <div id="viewer"></div>
-
-    <div class="hr"></div>
-
-    <div class="row" style="justify-content: space-between;">
-      <div style="font-weight: 600;">IR spectrum</div>
-      <div class="small muted" id="plotNote">Scaled frequencies shown.</div>
-    </div>
-    <div id="plot"></div>
-  </section>
-</main>
+  <!-- IR -->
+  <div id="plot"></div>
 
 <script>
-  // =========================
-  // CONFIG: update this filename if needed
-  // =========================
-  const DATA_URL = "index.json"; // <-- if yours is different, change here
+let INDEX = null;
+let CURRENT_MATCHES = [];
+let VIEWER = null;
+let CURRENT_MOL_ID = null;
 
-  // =========================
-  // State
-  // =========================
-  let DB = [];             // array of molecule objects
-  let currentMol = null;   // selected molecule object
-  let viewer = null;       // 3Dmol viewer instance
+/* ---------- ZIP loading helpers ---------- */
+/* Your zips were created like: zip -r spectra.zip spectra   (so paths are spectra/xxx.json) */
+let SPECTRA_ZIP = null;
+let GEOM_ZIP = null;
 
-  // =========================
-  // DOM
-  // =========================
-  const statusPill = document.getElementById("statusPill");
+async function loadZipOnce(which) {
+  if (which === "spectra") {
+    if (SPECTRA_ZIP) return SPECTRA_ZIP;
+    setMessage(`<span class="ok">Loading spectra.zip into memory…</span>`);
+    const buf = new Uint8Array(await (await fetch("spectra.zip")).arrayBuffer());
+    SPECTRA_ZIP = fflate.unzipSync(buf);
+    setMessage(`<span class="ok">spectra.zip loaded.</span>`);
+    return SPECTRA_ZIP;
+  } else {
+    if (GEOM_ZIP) return GEOM_ZIP;
+    document.getElementById("viewerMsg").innerText = "Loading geom.zip into memory…";
+    const buf = new Uint8Array(await (await fetch("geom.zip")).arrayBuffer());
+    GEOM_ZIP = fflate.unzipSync(buf);
+    document.getElementById("viewerMsg").innerText = "";
+    return GEOM_ZIP;
+  }
+}
 
-  const searchMode = document.getElementById("searchMode");
-  const formulaBox = document.getElementById("formulaBox");
-  const smilesBox = document.getElementById("smilesBox");
+async function readTextFromZip(which, filename) {
+  const z = await loadZipOnce(which);
+  const entry = z[filename];
+  if (!entry) return null;
+  return new TextDecoder().decode(entry);
+}
 
-  const formulaInput = document.getElementById("formulaInput");
-  const formulaCharge = document.getElementById("formulaCharge");
-  const smilesInput = document.getElementById("smilesInput");
-  const smilesCharge = document.getElementById("smilesCharge");
+async function readJSONFromZip(which, filename) {
+  const txt = await readTextFromZip(which, filename);
+  return txt ? JSON.parse(txt) : null;
+}
 
-  const searchFormulaBtn = document.getElementById("searchFormulaBtn");
-  const searchSmilesBtn = document.getElementById("searchSmilesBtn");
-  const clearBtn = document.getElementById("clearBtn");
-  const clearBtn2 = document.getElementById("clearBtn2");
+/* -------------------- index.json -------------------- */
+async function loadIndex() {
+  if (INDEX) return INDEX;
+  const r = await fetch("index.json");
+  INDEX = await r.json();
+  return INDEX;
+}
 
-  const resultsSelect = document.getElementById("resultsSelect");
-  const metaBox = document.getElementById("metaBox");
+function setMessage(html) { document.getElementById("msg").innerHTML = html; }
+function setMeta(html) { document.getElementById("meta").innerHTML = html; }
 
-  const downloadXyzBtn = document.getElementById("downloadXyzBtn");
-  const freqScale = document.getElementById("freqScale");
+function clearPlot() {
+  Plotly.purge("plot");
+  document.getElementById("plot").innerHTML = "";
+}
 
-  // =========================
-  // Helpers
-  // =========================
-  function safeInt(val) {
-    if (val === "" || val === null || val === undefined) return null;
-    const n = Number(val);
-    return Number.isFinite(n) ? Math.trunc(n) : null;
+function resetDropdown() {
+  const sel = document.getElementById("matchSelect");
+  sel.innerHTML = `<option value="">No matches loaded</option>`;
+  sel.disabled = true;
+  CURRENT_MATCHES = [];
+}
+
+function setDownloadEnabled(enabled) {
+  const b = document.getElementById("downloadBtn");
+  b.disabled = !enabled;
+}
+
+function onModeChange() {
+  const mode = document.getElementById("searchMode").value;
+
+  document.getElementById("smilesBox").style.display  = (mode === "smiles") ? "" : "none";
+  document.getElementById("formulaBox").style.display = (mode === "formula") ? "" : "none";
+
+  document.getElementById("chargeHint").innerText = "Optional in both modes.";
+
+  setMessage("");
+  setMeta("");
+  clearPlot();
+  resetDropdown();
+  clearViewer("");
+  setDownloadEnabled(false);
+  CURRENT_MOL_ID = null;
+}
+
+/* -------------------- 3Dmol (caged) -------------------- */
+function initViewer() {
+  if (VIEWER) return;
+  const element = document.getElementById("viewer");
+  VIEWER = $3Dmol.createViewer(element, { backgroundColor: "white" });
+  VIEWER.resize();
+  VIEWER.render();
+}
+
+function clearViewer(msg="") {
+  initViewer();
+  VIEWER.clear();
+  VIEWER.resize();
+  VIEWER.render();
+  document.getElementById("viewerMsg").innerText = msg;
+}
+
+async function renderMoleculeXYZ(molecule_id) {
+  initViewer();
+  clearViewer("Loading geometry…");
+  setDownloadEnabled(false);
+  CURRENT_MOL_ID = null;
+
+  // IMPORTANT: because your zip contains geom/<id>.xyz
+  const xyzText = await readTextFromZip("geom", `geom/${molecule_id}.xyz`);
+  if (!xyzText) {
+    clearViewer(`Geometry missing in geom.zip: geom/${molecule_id}.xyz`);
+    return;
   }
 
-  function setStatus(text) {
-    statusPill.textContent = text;
+  VIEWER.clear();
+  VIEWER.addModel(xyzText, "xyz");
+  VIEWER.setStyle({}, {stick: {radius: 0.18}, sphere: {scale: 0.28}});
+  VIEWER.zoomTo();
+  VIEWER.resize();
+  VIEWER.render();
+
+  document.getElementById("viewerMsg").innerText = "";
+  CURRENT_MOL_ID = molecule_id;
+  setDownloadEnabled(true);
+}
+
+function resetView() {
+  if (!VIEWER) return;
+  VIEWER.zoomTo();
+  VIEWER.resize();
+  VIEWER.render();
+}
+
+/* (3) Download XYZ from geom.zip */
+async function downloadXYZ() {
+  if (!CURRENT_MOL_ID) return;
+
+  const xyzText = await readTextFromZip("geom", `geom/${CURRENT_MOL_ID}.xyz`);
+  if (!xyzText) {
+    setMessage(`<span class="warn">Cannot download: missing geom/${CURRENT_MOL_ID}.xyz in geom.zip</span>`);
+    return;
   }
 
-  function clearResults() {
-    resultsSelect.innerHTML = `<option value="">— No results —</option>`;
-    currentMol = null;
-    downloadXyzBtn.disabled = true;
-    renderMeta(null);
-    renderViewer(null);
-    renderPlot(null);
+  const blob = new Blob([xyzText], { type: "chemical/x-xyz;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${CURRENT_MOL_ID}.xyz`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+/* -------------------- IR broadening -------------------- */
+function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0) {
+  const sigma = fwhm / 2.355;
+  const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
+  let y = new Array(npts).fill(0.0);
+
+  for (let i = 0; i < freqs.length; i++) {
+    const f = freqs[i];
+    const I = Math.max(0, intens[i]);
+    if (!Number.isFinite(f) || !Number.isFinite(I) || f <= 0) continue;
+    for (let k = 0; k < npts; k++) {
+      const dx = x[k] - f;
+      y[k] += I * Math.exp(-(dx * dx) / (2 * sigma * sigma));
+    }
   }
 
-  function populateResults(matches) {
-    if (!matches.length) {
-      resultsSelect.innerHTML = `<option value="">— No results —</option>`;
+  const ymin = Math.min(...y);
+  y = y.map(v => v - ymin);
+  const ymax = Math.max(...y);
+  if (ymax > 0) y = y.map(v => v / ymax);
+  return {x, y};
+}
+
+/* -------------------- search + render -------------------- */
+/* IMPORTANT:
+   index.json is keyed by: "SMILES||charge||spin"
+   We remove spin from user input, but we still READ spin from the key
+*/
+async function search() {
+  setMessage("");
+  setMeta("");
+  clearPlot();
+  resetDropdown();
+  clearViewer("");
+  setDownloadEnabled(false);
+  CURRENT_MOL_ID = null;
+
+  const idx = await loadIndex();
+  const mode = document.getElementById("searchMode").value;
+
+  const chargeFilter = document.getElementById("charge").value.trim(); // optional in both modes
+
+  if (mode === "smiles") {
+    const smiles = document.getElementById("smiles").value.trim();
+    if (!smiles) {
+      setMessage(`<span class="warn">Please enter a <b>SMILES</b> string.</span>`);
       return;
     }
 
-    const options = matches.map((m, idx) => {
-      // These fields are used only for display — adjust if you prefer a different label
-      const id = m.id ?? m.species_id ?? m.name ?? idx;
-      const f = m.formula ?? "—";
-      const q = (m.charge ?? "—");
-      const sm = (m.smiles ?? "—");
-      return `<option value="${idx}">${id} | ${f} | q=${q} | ${sm}</option>`;
-    });
+    // scan all keys and match smiles; optionally filter by charge
+    const hits = [];
+    for (const k in idx) {
+      const parts = k.split("||");
+      const kSmiles = (parts[0] ?? "").trim();
+      const kCharge = (parts[1] ?? "").trim();
+      const kSpin = (parts[2] ?? "").trim();
 
-    resultsSelect.innerHTML = options.join("");
-    resultsSelect.value = "0";
-    selectFromMatches(matches, 0);
-  }
+      if (kSmiles !== smiles) continue;
+      if (chargeFilter !== "" && kCharge !== chargeFilter) continue;
 
-  function selectFromMatches(matches, index) {
-    const m = matches[index];
-    currentMol = m;
-    downloadXyzBtn.disabled = !Boolean(getXyzString(m));
-    renderMeta(m);
-    renderViewer(m);
-    renderPlot(m);
-  }
-
-  function getXyzString(m) {
-    // Change this if your xyz is stored under a different key
-    // common variants: m.xyz, m.xyz_string, m.geometry_xyz
-    return m?.xyz ?? m?.xyz_string ?? m?.geometry_xyz ?? null;
-  }
-
-  function getIrPeaks(m) {
-    // Change this if your IR peaks are stored under a different key
-    // expected format: [{freq: 1100.2, intensity: 25.1}, ...]
-    // common variants: m.ir_peaks, m.ir, m.frequencies/intensities arrays, etc.
-    return m?.ir_peaks ?? m?.ir ?? null;
-  }
-
-  function renderMeta(m) {
-    if (!m) {
-      metaBox.innerHTML = `<div class="muted">Status</div><div class="muted">No molecule selected.</div>`;
-      return;
+      const rec = idx[k];
+      const ms = rec?.matches || [];
+      for (const m of ms) hits.push({...m, charge: kCharge, spin: kSpin, smiles: kSmiles});
     }
-    const id = m.id ?? m.species_id ?? m.name ?? "—";
-    const formula = m.formula ?? "—";
-    const smiles = m.smiles ?? "—";
-    const charge = (m.charge ?? "—");
-    const spin = (m.spin ?? m.multiplicity ?? "—"); // displayed if present, not searched on
-    const nAtoms = m.num_atoms ?? m.natoms ?? m.number_atoms ?? "—";
 
-    metaBox.innerHTML = `
-      <div class="muted">ID</div><div>${id}</div>
-      <div class="muted">Formula</div><div>${formula}</div>
-      <div class="muted">SMILES</div><div style="word-break: break-all;">${smiles}</div>
-      <div class="muted">Charge</div><div>${charge}</div>
-      <div class="muted">Spin/Mult</div><div>${spin}</div>
-      <div class="muted">Atoms</div><div>${nAtoms}</div>
-    `;
-  }
-
-  // =========================
-  // 3D viewer
-  // =========================
-  function initViewer() {
-    viewer = $3Dmol.createViewer("viewer", { backgroundColor: "white" });
-    viewer.zoomTo();
-    viewer.render();
-  }
-
-  function renderViewer(m) {
-    if (!viewer) initViewer();
-    viewer.clear();
-
-    if (!m) {
-      viewer.render();
+    if (hits.length === 0) {
+      setMessage(`<span class="warn">No matches found for that SMILES${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
       return;
     }
 
-    const xyz = getXyzString(m);
-    if (!xyz) {
-      viewer.render();
+    CURRENT_MATCHES = hits;
+
+  } else {
+    const formula = document.getElementById("formula").value.trim();
+    if (!formula) {
+      setMessage(`<span class="warn">Please enter a formula like <code>C3 F1 H3 O3</code>.</span>`);
       return;
     }
 
-    viewer.addModel(xyz, "xyz");
-    viewer.setStyle({}, { stick: {}, sphere: { scale: 0.25 } });
-    viewer.zoomTo();
-    viewer.render();
-  }
+    const hits = [];
+    for (const k in idx) {
+      const rec = idx[k];
+      const ms = rec?.matches || [];
+      const parts = k.split("||");
+      const q = (parts[1] ?? "").trim();
+      const sp = (parts[2] ?? "").trim();
+      const sm = (parts[0] ?? "").trim();
 
-  // =========================
-  // IR plotting
-  // =========================
-  function gaussian(x, mu, sigma) {
-    const z = (x - mu) / sigma;
-    return Math.exp(-0.5 * z * z);
-  }
+      if (chargeFilter !== "" && q !== chargeFilter) continue;
 
-  function renderPlot(m) {
-    const plotDiv = document.getElementById("plot");
-
-    if (!m) {
-      Plotly.newPlot(plotDiv, [], {
-        margin: { l: 50, r: 20, t: 10, b: 45 },
-        xaxis: { title: "Wavenumber (cm⁻¹)" },
-        yaxis: { title: "Intensity (a.u.)" }
-      }, {displayModeBar: true});
-      return;
-    }
-
-    const peaks = getIrPeaks(m);
-    if (!peaks || !peaks.length) {
-      Plotly.newPlot(plotDiv, [], {
-        margin: { l: 50, r: 20, t: 10, b: 45 },
-        xaxis: { title: "Wavenumber (cm⁻¹)" },
-        yaxis: { title: "Intensity (a.u.)" },
-        annotations: [{
-          text: "No IR peak data found for this molecule.",
-          xref: "paper", yref: "paper", x: 0.5, y: 0.5, showarrow: false
-        }]
-      }, {displayModeBar: true});
-      return;
-    }
-
-    // (4) Frequency scaling
-    const scale = Number(freqScale.value) || 1.0;
-
-    // If your peak objects use different keys, change `p.freq` and `p.intensity` here:
-    const freqs = peaks.map(p => (p.freq ?? p.frequency ?? p.wavenumber) * scale);
-    const intens = peaks.map(p => (p.intensity ?? p.ir_intensity ?? p.I));
-
-    // simple spectrum from sticks -> gaussian broadening
-    const minX = Math.max(0, Math.min(...freqs) - 200);
-    const maxX = Math.max(...freqs) + 200;
-
-    const N = 2500;
-    const xs = new Array(N);
-    const ys = new Array(N).fill(0);
-
-    const sigma = 12; // cm^-1 broadening; adjust if you want
-    for (let i = 0; i < N; i++) {
-      xs[i] = minX + (maxX - minX) * (i / (N - 1));
-    }
-    for (let k = 0; k < freqs.length; k++) {
-      const mu = freqs[k];
-      const amp = intens[k];
-      for (let i = 0; i < N; i++) {
-        ys[i] += amp * gaussian(xs[i], mu, sigma);
+      for (const m of ms) {
+        if ((m.formula || "").trim() === formula) {
+          hits.push({...m, charge: q, spin: sp, smiles: sm});
+        }
       }
     }
 
-    // normalize to 1 for visualization (common)
-    const ymax = Math.max(...ys);
-    const ysn = ys.map(v => ymax > 0 ? v / ymax : v);
-
-    const traceSpectrum = {
-      x: xs,
-      y: ysn,
-      mode: "lines",
-      name: "Broadened spectrum"
-    };
-
-    const traceSticks = {
-      x: freqs.flatMap(f => [f, f, null]),
-      y: intens.flatMap(I => [0, I, null]),
-      mode: "lines",
-      name: "Sticks",
-      yaxis: "y2"
-    };
-
-    Plotly.newPlot(plotDiv, [traceSpectrum, traceSticks], {
-      margin: { l: 50, r: 20, t: 10, b: 45 },
-      xaxis: { title: "Wavenumber (cm⁻¹)" },
-      yaxis: { title: "Intensity (normalized)", rangemode: "tozero" },
-      yaxis2: {
-        title: "Stick intensity",
-        overlaying: "y",
-        side: "right",
-        showgrid: false,
-        rangemode: "tozero",
-        showticklabels: false
-      },
-      legend: { orientation: "h" }
-    }, {displayModeBar: true});
-  }
-
-  // =========================
-  // Download XYZ
-  // =========================
-  function downloadXYZ(m) {
-    const xyz = getXyzString(m);
-    if (!xyz) return;
-
-    const id = (m.id ?? m.species_id ?? m.name ?? "molecule").toString().replaceAll(" ", "_");
-    const filename = `${id}.xyz`;
-
-    const blob = new Blob([xyz], { type: "chemical/x-xyz;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    URL.revokeObjectURL(url);
-  }
-
-  // =========================
-  // Search logic
-  // =========================
-  function searchByFormula() {
-    const f = (formulaInput.value || "").trim();
-    const q = safeInt(formulaCharge.value);
-
-    if (!f) {
-      clearResults();
+    if (hits.length === 0) {
+      setMessage(`<span class="warn">No matches found for that formula${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
       return;
     }
 
-    let matches = DB.filter(m => (m.formula ?? "").trim() === f);
-
-    if (q !== null) {
-      matches = matches.filter(m => safeInt(m.charge) === q);
-    }
-
-    // Store current matches on the select element (simple approach)
-    resultsSelect._matches = matches;
-    populateResults(matches);
+    CURRENT_MATCHES = hits;
   }
 
-  function searchBySmiles() {
-    const sm = (smilesInput.value || "").trim();
-    const q = safeInt(smilesCharge.value);
+  const sel = document.getElementById("matchSelect");
+  sel.disabled = false;
+  sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
+    // Keep showing spin info (it exists in the dataset), just don’t ask user to input it.
+    const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}`;
+    return `<option value="${i}">${label}</option>`;
+  }).join("");
 
-    if (!sm) {
-      clearResults();
-      return;
-    }
+  sel.value = "0";
+  await renderMatch(0);
+}
 
-    let matches = DB.filter(m => (m.smiles ?? "").trim() === sm);
+async function selectMatch() {
+  const sel = document.getElementById("matchSelect");
+  const i = parseInt(sel.value, 10);
+  if (!Number.isNaN(i)) await renderMatch(i);
+}
 
-    // (1) only optional charge; no spin
-    if (q !== null) {
-      matches = matches.filter(m => safeInt(m.charge) === q);
-    }
+async function renderMatch(i) {
+  setMessage("");
+  setMeta("");
+  clearPlot();
 
-    resultsSelect._matches = matches;
-    populateResults(matches);
+  const m = CURRENT_MATCHES[i];
+  if (!m) return;
+
+  setMeta(
+    `<b>Molecule ID:</b> ${m.molecule_id}<br/>
+     <b>Formula:</b> ${m.formula || ""}<br/>
+     <b>Chemical system:</b> ${m.chemical_system || ""}<br/>
+     <b>Charge:</b> ${m.charge} &nbsp; <b>Spin:</b> ${m.spin}`
+  );
+
+  await renderMoleculeXYZ(m.molecule_id);
+
+  if (!m.has_ir) {
+    setMessage(`<span class="warn">Species exists, but IR spectrum is not available.</span>`);
+    return;
   }
 
-  // =========================
-  // Events
-  // =========================
-  searchMode.addEventListener("change", () => {
-    const mode = searchMode.value;
-    if (mode === "formula") {
-      formulaBox.style.display = "";
-      smilesBox.style.display = "none";
-    } else {
-      formulaBox.style.display = "none";
-      smilesBox.style.display = "";
-    }
-    clearResults();
-  });
-
-  searchFormulaBtn.addEventListener("click", searchByFormula);
-  searchSmilesBtn.addEventListener("click", searchBySmiles);
-
-  clearBtn.addEventListener("click", () => {
-    formulaInput.value = "";
-    formulaCharge.value = "";
-    clearResults();
-  });
-  clearBtn2.addEventListener("click", () => {
-    smilesInput.value = "";
-    smilesCharge.value = "";
-    clearResults();
-  });
-
-  resultsSelect.addEventListener("change", () => {
-    const matches = resultsSelect._matches || [];
-    const idx = Number(resultsSelect.value);
-    if (!matches.length || !Number.isFinite(idx)) return;
-    selectFromMatches(matches, idx);
-  });
-
-  downloadXyzBtn.addEventListener("click", () => {
-    if (currentMol) downloadXYZ(currentMol);
-  });
-
-  // re-render plot when scale changes
-  freqScale.addEventListener("change", () => {
-    if (currentMol) renderPlot(currentMol);
-  });
-
-  // Enter key triggers search in active mode
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    if (searchMode.value === "formula") searchByFormula();
-    else searchBySmiles();
-  });
-
-  // =========================
-  // Load data
-  // =========================
-  async function loadData() {
-    setStatus("Loading data…");
-    try {
-      const resp = await fetch(DATA_URL);
-      if (!resp.ok) throw new Error(`Failed to fetch ${DATA_URL}: ${resp.status}`);
-      const json = await resp.json();
-
-      // If your JSON is {molecules: [...]}, adapt here:
-      DB = Array.isArray(json) ? json : (json.molecules ?? json.data ?? []);
-
-      setStatus(`Loaded ${DB.length} molecules`);
-      clearResults();
-
-      // (2) Default search mode is formula — already selected in HTML
-      formulaBox.style.display = "";
-      smilesBox.style.display = "none";
-    } catch (err) {
-      console.error(err);
-      setStatus("Error loading data");
-      metaBox.innerHTML = `<div class="muted">Error</div><div class="muted" style="word-break: break-all;">${err.message}</div>`;
-    }
+  // IMPORTANT: because your zip contains spectra/<id>.json
+  const spec = await readJSONFromZip("spectra", `spectra/${m.molecule_id}.json`);
+  if (!spec) {
+    setMessage(`<span class="warn">IR spectrum missing in spectra.zip: spectra/${m.molecule_id}.json</span>`);
+    return;
   }
 
-  initViewer();
-  loadData();
+  // (4) frequency scaling for visualization
+  const scale = Number(document.getElementById("freqScale").value) || 1.0;
+
+  const freqs = (spec.frequencies || []).map(Number).map(f => f * scale);
+  const intens = (spec.intensities || []).map(Number);
+
+  const xmin = 0, xmax = 3200, npts = 8000, fwhm = 25.0;
+  const broad = broadenGaussian(freqs, intens, xmin, xmax, npts, fwhm);
+
+  const trace = {
+    x: broad.x,
+    y: broad.y,
+    mode: "lines",
+    hovertemplate: "ν=%{x:.1f} cm⁻¹<br>I(norm)=%{y:.3f}<extra></extra>"
+  };
+
+  const layout = {
+    title: `IR Spectrum: ${m.molecule_id} (scaled by ${scale})`,
+    xaxis: { title: "Wavenumber (cm⁻¹)", autorange: "reversed" },
+    yaxis: { title: "Intensity (normalized)" },
+    hovermode: "x unified"
+  };
+
+  Plotly.newPlot("plot", [trace], layout, {responsive: true});
+  setMessage(`<span class="ok">Showing broadened IR spectrum (Gaussian, FWHM=${fwhm} cm⁻¹). Frequencies scaled by ${scale}.</span>`);
+}
+
+document.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+// init
+initViewer();
+onModeChange();
 </script>
+
 </body>
 </html>
