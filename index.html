@@ -636,7 +636,7 @@
     URL.revokeObjectURL(url);
   }
 
-  function broadenGaussian(freqs, intens, xmin=0, xmax=4000, npts=8000, fwhm=25.0){
+  function broadenGaussian(freqs, intens, xmin=0, xmax=3200, npts=8000, fwhm=25.0){
     const sigma = fwhm / 2.355;
     const x = Array.from({length: npts}, (_, k) => xmin + (xmax - xmin) * k / (npts - 1));
     let y = new Array(npts).fill(0.0);
@@ -794,7 +794,7 @@
     const intens = (spec.intensities || []).map(Number);
 
     const fwhm = 25.0;
-    const broad = broadenGaussian(freqs, intens, 0, 4000, 8000, fwhm);
+    const broad = broadenGaussian(freqs, intens, 0, 3200, 8000, fwhm);
 
     const trace = {
       x: broad.x,
