@@ -349,9 +349,10 @@
         <div class="row">
           <div style="flex:1; min-width: 220px;">
             <label for="searchMode">Search mode</label>
+            <!-- ✅ FIXED HTML for SMILES option -->
             <select id="searchMode" style="width:100%;" onchange="onModeChange()">
               <option value="formula" selected>Formula</option>
-              </option value="smiles">SMILES</option>
+              <option value="smiles">SMILES</option>
             </select>
           </div>
 
@@ -508,7 +509,7 @@
     forceViewerReflow();
   }
 
-  // ✅ NEW: formatting helpers for energies/entropy
+  // Formatting helpers for energies/entropy
   function fmtNum(x, digits=6){
     const v = Number(x);
     if (!Number.isFinite(v)) return "NA";
@@ -517,10 +518,24 @@
   function fmtEntropy(x){
     const v = Number(x);
     if (!Number.isFinite(v)) return "NA";
-    // entropy in your index is stored as S_eV_perK
-    // show compact scientific-ish formatting
     if (Math.abs(v) < 0.01) return v.toExponential(3);
     return v.toFixed(6);
+  }
+
+  // ✅ NEW: sort matches by stability (lowest G_eV first)
+  function sortMatchesByG(matches){
+    return [...matches].sort((a, b) => {
+      const ga = Number(a.G_eV);
+      const gb = Number(b.G_eV);
+
+      const aOK = Number.isFinite(ga);
+      const bOK = Number.isFinite(gb);
+
+      if (aOK && bOK) return ga - gb;   // lowest G first
+      if (aOK && !bOK) return -1;       // finite G before missing
+      if (!aOK && bOK) return 1;        // missing after finite
+      return 0;
+    });
   }
 
   async function loadZipOnce(which){
@@ -715,7 +730,7 @@
         setMessage(`<span class="warn">No matches found for that SMILES${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
         return;
       }
-      CURRENT_MATCHES = hits;
+      CURRENT_MATCHES = sortMatchesByG(hits);
 
     } else {
       const formula = document.getElementById("formula").value.trim();
@@ -749,13 +764,12 @@
         setMessage(`<span class="warn">No matches found for that formula${chargeFilter!=="" ? " with charge "+chargeFilter : ""}.</span>`);
         return;
       }
-      CURRENT_MATCHES = hits;
+      CURRENT_MATCHES = sortMatchesByG(hits);
     }
 
     const sel = document.getElementById("matchSelect");
     sel.disabled = false;
     sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
-      // Optional: show G in the dropdown label if present
       const gtxt = (m.G_eV != null && Number.isFinite(Number(m.G_eV))) ? ` | G=${fmtNum(m.G_eV, 3)} eV` : "";
       const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}${gtxt}`;
       return `<option value="${i}">${label}</option>`;
@@ -778,10 +792,7 @@
     const m = CURRENT_MATCHES[i];
     if (!m) return;
 
-    // ✅ NEW: include thermo values in left panel
     const E = (m.E_eV != null) ? fmtNum(m.E_eV, 6) : "NA";
-    const H = (m.H_eV != null) ? fmtNum(m.H_eV, 6) : "NA";
-    const S = (m.S_eV_perK != null) ? fmtEntropy(m.S_eV_perK) : "NA";
     const G = (m.G_eV != null) ? fmtNum(m.G_eV, 6) : "NA";
 
     setMetaHTML(`
@@ -791,7 +802,6 @@
         <div>Chemical system</div><div>${m.chemical_system || ""}</div>
         <div>Charge</div><div>${m.charge}</div>
         <div>Spin</div><div>${m.spin}</div>
-
         <div style="margin-top:6px;">E (eV)</div><div style="margin-top:6px;"><b>${E}</b></div>
         <div>G (eV) (at 25 C)</div><div><b>${G}</b></div>
       </div>
