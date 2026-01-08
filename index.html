@@ -209,7 +209,7 @@
     }
     .meta-grid{
       display: grid;
-      grid-template-columns: 110px 1fr;
+      grid-template-columns: 120px 1fr;
       gap: 6px 10px;
       margin-top: 6px;
     }
@@ -349,9 +349,10 @@
         <div class="row">
           <div style="flex:1; min-width: 220px;">
             <label for="searchMode">Search mode</label>
+            <!-- ✅ FIXED: your SMILES option had invalid HTML -->
             <select id="searchMode" style="width:100%;" onchange="onModeChange()">
               <option value="formula" selected>Formula</option>
-              </option value="smiles">SMILES</option>
+              <option value="smiles">SMILES</option>
             </select>
           </div>
 
@@ -505,8 +506,22 @@
     setDownloadEnabled(false);
     CURRENT_MOL_ID = null;
 
-    // ensure layout settles for 3Dmol
     forceViewerReflow();
+  }
+
+  // ✅ NEW: formatting helpers for energies/entropy
+  function fmtNum(x, digits=6){
+    const v = Number(x);
+    if (!Number.isFinite(v)) return "NA";
+    return v.toFixed(digits);
+  }
+  function fmtEntropy(x){
+    const v = Number(x);
+    if (!Number.isFinite(v)) return "NA";
+    // entropy in your index is stored as S_eV_perK
+    // show compact scientific-ish formatting
+    if (Math.abs(v) < 0.01) return v.toExponential(3);
+    return v.toFixed(6);
   }
 
   async function loadZipOnce(which){
@@ -541,7 +556,7 @@
 
   async function loadIndex(){
     if (INDEX) return INDEX;
-    setStatus("idle", "Loading index…");
+    setStatus("warn", "Loading index…");
     showLoading("Loading index.json…");
     const r = await fetch("index.json");
     INDEX = await r.json();
@@ -741,7 +756,9 @@
     const sel = document.getElementById("matchSelect");
     sel.disabled = false;
     sel.innerHTML = CURRENT_MATCHES.map((m, i) => {
-      const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}`;
+      // Optional: show G in the dropdown label if present
+      const gtxt = (m.G_eV != null && Number.isFinite(Number(m.G_eV))) ? ` | G=${fmtNum(m.G_eV, 3)} eV` : "";
+      const label = `${m.molecule_id} | ${m.formula || ""} | q=${m.charge} spin=${m.spin} | IR: ${m.has_ir ? "yes" : "no"}${gtxt}`;
       return `<option value="${i}">${label}</option>`;
     }).join("");
 
@@ -762,6 +779,12 @@
     const m = CURRENT_MATCHES[i];
     if (!m) return;
 
+    // ✅ NEW: include thermo values in left panel
+    const E = (m.E_eV != null) ? fmtNum(m.E_eV, 6) : "NA";
+    const H = (m.H_eV != null) ? fmtNum(m.H_eV, 6) : "NA";
+    const S = (m.S_eV_perK != null) ? fmtEntropy(m.S_eV_perK) : "NA";
+    const G = (m.G_eV != null) ? fmtNum(m.G_eV, 6) : "NA";
+
     setMetaHTML(`
       <div class="meta-grid">
         <div>Molecule ID</div><div><b>${m.molecule_id}</b></div>
@@ -769,6 +792,14 @@
         <div>Chemical system</div><div>${m.chemical_system || ""}</div>
         <div>Charge</div><div>${m.charge}</div>
         <div>Spin</div><div>${m.spin}</div>
+
+        <div style="margin-top:6px;">E (eV)</div><div style="margin-top:6px;"><b>${E}</b></div>
+        <div>H (eV)</div><div><b>${H}</b></div>
+        <div>S (eV/K)</div><div><b>${S}</b></div>
+        <div>G (eV)</div><div><b>${G}</b></div>
+      </div>
+      <div class="section-note" style="margin-top:8px;">
+        Thermodynamics are taken from <code>thermo['eV']</code> in the LIBE dataset.
       </div>
     `);
 
